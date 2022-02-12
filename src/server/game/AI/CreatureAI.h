@@ -1,6 +1,5 @@
 /*
- * Copyright (C) 2008-2013 TrinityCore <http://www.trinitycore.org/>
- * Copyright (C) 2005-2009 MaNGOS <http://getmangos.com/>
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -19,15 +18,22 @@
 #ifndef TRINITY_CREATUREAI_H
 #define TRINITY_CREATUREAI_H
 
-#include "Creature.h"
 #include "UnitAI.h"
 #include "Common.h"
+#include "ObjectDefines.h"
+#include "Optional.h"
+#include "QuestDef.h"
 
-class WorldObject;
-class Unit;
+class AreaBoundary;
 class Creature;
-class Player;
-class SpellInfo;
+class DynamicObject;
+class GameObject;
+class PlayerAI;
+class WorldObject;
+struct Position;
+enum SpellFinishReason : uint8;
+
+typedef std::vector<AreaBoundary const*> CreatureBoundary;
 
 #define TIME_INTERVAL_LOOK   5000
 #define VISIBILITY_RANGE    10000
@@ -63,93 +69,118 @@ enum SCEquip
     EQUIP_UNEQUIP   = 0
 };
 
-class CreatureAI : public UnitAI
+class TC_GAME_API CreatureAI : public UnitAI
 {
     protected:
         Creature* const me;
 
         bool UpdateVictim();
-        bool UpdateVictimWithGaze();
-
-        void SetGazeOn(Unit* target);
 
         Creature* DoSummon(uint32 entry, Position const& pos, uint32 despawnTime = 30000, TempSummonType summonType = TEMPSUMMON_CORPSE_TIMED_DESPAWN);
         Creature* DoSummon(uint32 entry, WorldObject* obj, float radius = 5.0f, uint32 despawnTime = 30000, TempSummonType summonType = TEMPSUMMON_CORPSE_TIMED_DESPAWN);
         Creature* DoSummonFlyer(uint32 entry, WorldObject* obj, float flightZ, float radius = 5.0f, uint32 despawnTime = 30000, TempSummonType summonType = TEMPSUMMON_CORPSE_TIMED_DESPAWN);
 
-    public:
-        void Talk(uint8 id, uint64 WhisperGuid = 0);
-        explicit CreatureAI(Creature* creature) : UnitAI(creature), me(creature), m_MoveInLineOfSight_locked(false) {}
+        bool CheckBoundary(Position const* who = nullptr) const;
 
-        virtual ~CreatureAI() {}
+    public:
+        enum EvadeReason
+        {
+            EVADE_REASON_NO_HOSTILES,       // the creature's threat list is empty
+            EVADE_REASON_BOUNDARY,          // the creature has moved outside its evade boundary
+            EVADE_REASON_NO_PATH,           // the creature was unable to reach its target for over 5 seconds
+            EVADE_REASON_SEQUENCE_BREAK,    // this is a boss and the pre-requisite encounters for engaging it are not defeated yet
+            EVADE_REASON_OTHER
+        };
+
+        explicit CreatureAI(Creature* creature);
+
+        ~CreatureAI();
+
+        bool IsEngaged() const { return _isEngaged; }
+
+        void Talk(uint8 id, WorldObject const* whisperTarget = nullptr);
 
         /// == Reactions At =================================
 
         // Called if IsVisible(Unit* who) is true at each who move, reaction at visibility zone enter
         void MoveInLineOfSight_Safe(Unit* who);
 
-        // Called in Creature::Update when deathstate = DEAD. Inherited classes may maniuplate the ability to respawn based on scripted events.
-        virtual bool CanRespawn() { return true; }
+        // Trigger Creature "Alert" state (creature can see stealthed unit)
+        void TriggerAlert(Unit const* who) const;
 
         // Called for reaction at stopping attack at no attackers or targets
-        virtual void EnterEvadeMode();
+        virtual void EnterEvadeMode(EvadeReason why = EVADE_REASON_OTHER);
 
-        // Called for reaction at enter to combat if not in combat yet (enemy can be NULL)
-        virtual void EnterCombat(Unit* /*victim*/) {}
+        // Called for reaction whenever we start being in combat (overridden from base UnitAI)
+        void JustEnteredCombat(Unit* /*who*/) override;
+
+        // Called for reaction whenever a new non-offline unit is added to the threat list
+        virtual void JustStartedThreateningMe(Unit* who) { if (!IsEngaged()) EngagementStart(who); }
+
+        // Called for reaction when initially engaged
+        virtual void JustEngagedWith(Unit* /*who*/) { }
 
         // Called when the creature is killed
-        virtual void JustDied(Unit* /*killer*/) {}
+        virtual void JustDied(Unit* /*killer*/) { }
 
         // Called when the creature kills a unit
-        virtual void KilledUnit(Unit* /*victim*/) {}
+        virtual void KilledUnit(Unit* /*victim*/) { }
 
         // Called when the creature summon successfully other creature
-        virtual void JustSummoned(Creature* /*summon*/) {}
-        virtual void IsSummonedBy(Unit* /*summoner*/) {}
+        virtual void JustSummoned(Creature* /*summon*/) { }
+        virtual void IsSummonedBy(Unit* /*summoner*/) { }
 
-        virtual void SummonedCreatureDespawn(Creature* /*summon*/) {}
-        virtual void SummonedCreatureDies(Creature* /*summon*/, Unit* /*killer*/) {}
+        virtual void SummonedCreatureDespawn(Creature* /*summon*/) { }
+        virtual void SummonedCreatureDies(Creature* /*summon*/, Unit* /*killer*/) { }
+
+        // Called when the creature successfully summons a gameobject
+        virtual void JustSummonedGameobject(GameObject* /*gameobject*/) { }
+        virtual void SummonedGameobjectDespawn(GameObject* /*gameobject*/) { }
+
+        // Called when the creature successfully registers a dynamicobject
+        virtual void JustRegisteredDynObject(DynamicObject* /*dynObject*/) { }
+        virtual void JustUnregisteredDynObject(DynamicObject* /*dynObject*/) { }
 
         // Called when hit by a spell
-        virtual void SpellHit(Unit* /*caster*/, SpellInfo const* /*spell*/) {}
+        virtual void SpellHit(Unit* /*caster*/, SpellInfo const* /*spell*/) { }
 
         // Called when spell hits a target
-        virtual void SpellHitTarget(Unit* /*target*/, SpellInfo const* /*spell*/) {}
+        virtual void SpellHitTarget(Unit* /*target*/, SpellInfo const* /*spell*/) { }
 
-        // Called when the creature is target of hostile action: swing, hostile spell landed, fear/etc)
-        virtual void AttackedBy(Unit* /*attacker*/) {}
-        virtual bool IsEscorted() { return false; }
+        // Should return true if the NPC is currently being escorted
+        virtual bool IsEscorted() const { return false; }
 
-        // Called when creature is spawned or respawned (for reseting variables)
-        virtual void JustRespawned() { Reset(); }
+        // Called when creature appears in the world (spawn, respawn, grid load etc...)
+        virtual void JustAppeared();
 
         // Called at waypoint reached or point movement finished
-        virtual void MovementInform(uint32 /*type*/, uint32 /*id*/) {}
+        virtual void MovementInform(uint32 /*type*/, uint32 /*id*/) { }
 
-        void OnCharmed(bool apply);
+        void OnCharmed(bool isNew) override;
+
+        virtual void OnSpellCastFinished(SpellInfo const* /*spell*/, SpellFinishReason /*reason*/) {  }
 
         // Called at reaching home after evade
-        virtual void JustReachedHome() {}
+        virtual void JustReachedHome() { }
 
-        void DoZoneInCombat(Creature* creature = NULL, float maxRangeToNearestTarget = 50.0f);
+        void DoZoneInCombat(Creature* creature = nullptr);
 
         // Called at text emote receive from player
-        virtual void ReceiveEmote(Player* /*player*/, uint32 /*emoteId*/) {}
+        virtual void ReceiveEmote(Player* /*player*/, uint32 /*emoteId*/) { }
 
         // Called when owner takes damage
-        virtual void OwnerAttackedBy(Unit* /*attacker*/) {}
+        virtual void OwnerAttackedBy(Unit* attacker) { _OnOwnerCombatInteraction(attacker); }
 
         // Called when owner attacks something
-        virtual void OwnerAttacked(Unit* /*target*/) {}
+        virtual void OwnerAttacked(Unit* target) { _OnOwnerCombatInteraction(target); }
 
         /// == Triggered Actions Requested ==================
 
         // Called when creature attack expected (if creature can and no have current victim)
-        // Note: for reaction at hostile action must be called AttackedBy function.
-        //virtual void AttackStart(Unit*) {}
+        //virtual void AttackStart(Unit*) { }
 
         // Called at World update tick
-        //virtual void UpdateAI(const uint32 /*diff*/) {}
+        //virtual void UpdateAI(const uint32 /*diff*/) { }
 
         /// == State checks =================================
 
@@ -157,31 +188,78 @@ class CreatureAI : public UnitAI
         //virtual bool IsVisible(Unit*) const { return false; }
 
         // called when the corpse of this creature gets removed
-        virtual void CorpseRemoved(uint32& /*respawnDelay*/) {}
+        virtual void CorpseRemoved(uint32& /*respawnDelay*/) { }
 
         // Called when victim entered water and creature can not enter water
-        //virtual bool canReachByRangeAttack(Unit*) { return false; }
+        //virtual bool CanReachByRangeAttack(Unit*) { return false; }
+
+        /// == Gossip system ================================
+
+        // Called when the dialog status between a player and the creature is requested.
+        virtual Optional<QuestGiverStatus> GetDialogStatus(Player* /*player*/) { return std::nullopt; }
+
+        // Called when a player opens a gossip dialog with the creature.
+        virtual bool GossipHello(Player* /*player*/) { return false; }
+
+        // Called when a player selects a gossip item in the creature's gossip menu.
+        virtual bool GossipSelect(Player* /*player*/, uint32 /*menuId*/, uint32 /*gossipListId*/) { return false; }
+
+        // Called when a player selects a gossip with a code in the creature's gossip menu.
+        virtual bool GossipSelectCode(Player* /*player*/, uint32 /*menuId*/, uint32 /*gossipListId*/, char const* /*code*/) { return false; }
+
+        // Called when a player accepts a quest from the creature.
+        virtual void QuestAccept(Player* /*player*/, Quest const* /*quest*/) { }
+
+        // Called when a player completes a quest and is rewarded, opt is the selected item's index or 0
+        virtual void QuestReward(Player* /*player*/, Quest const* /*quest*/, uint32 /*opt*/) { }
+
+        /// == Waypoints system =============================
+
+        virtual void WaypointPathStarted(uint32 /*pathId*/) { }
+        virtual void WaypointStarted(uint32 /*nodeId*/, uint32 /*pathId*/) { }
+        virtual void WaypointReached(uint32 /*nodeId*/, uint32 /*pathId*/) { }
+        virtual void WaypointPathEnded(uint32 /*nodeId*/, uint32 /*pathId*/) { }
 
         /// == Fields =======================================
 
-        // Pointer to controlled by AI creature
-        //Creature* const me;
+        virtual void PassengerBoarded(Unit* /*passenger*/, int8 /*seatId*/, bool /*apply*/) { }
 
-        virtual void PassengerBoarded(Unit* /*passenger*/, int8 /*seatId*/, bool /*apply*/) {}
-
-        virtual void OnSpellClick(Unit* /*clicker*/) { }
+        virtual void OnSpellClick(Unit* /*clicker*/, bool& /*result*/) { }
 
         virtual bool CanSeeAlways(WorldObject const* /*obj*/) { return false; }
+
+        // Called when a player is charmed by the creature
+        // If a PlayerAI* is returned, that AI is placed on the player instead of the default charm AI
+        // Object destruction is handled by Unit::RemoveCharmedBy
+        virtual PlayerAI* GetAIForCharmedPlayer(Player* /*who*/) { return nullptr; }
+
+        // intended for encounter design/debugging. do not use for other purposes. expensive.
+        int32 VisualizeBoundary(uint32 duration, Unit* owner = nullptr, bool fill = false) const;
+
+        // boundary system methods
+        virtual bool CheckInRoom();
+        CreatureBoundary const* GetBoundary() const { return _boundary; }
+        void SetBoundary(CreatureBoundary const* boundary, bool negativeBoundaries = false);
+
+        static bool IsInBounds(CreatureBoundary const& boundary, Position const* who);
+
     protected:
+        void EngagementStart(Unit* who);
+        void EngagementOver();
         virtual void MoveInLineOfSight(Unit* /*who*/);
 
-        bool _EnterEvadeMode();
+        bool _EnterEvadeMode(EvadeReason why = EVADE_REASON_OTHER);
+
+        CreatureBoundary const* _boundary;
+        bool _negateBoundary;
 
     private:
-        bool m_MoveInLineOfSight_locked;
+        bool _isEngaged;
+        bool _moveInLOSLocked;
+        void _OnOwnerCombatInteraction(Unit* target);
 };
 
-enum Permitions
+enum Permitions : int32
 {
     PERMIT_BASE_NO                 = -1,
     PERMIT_BASE_IDLE               = 1,

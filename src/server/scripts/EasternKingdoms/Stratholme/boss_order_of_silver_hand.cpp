@@ -1,6 +1,5 @@
 /*
- * Copyright (C) 2008-2013 TrinityCore <http://www.trinitycore.org/>
- * Copyright (C) 2006-2009 ScriptDev2 <https://scriptdev2.svn.sourceforge.net/>
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -24,6 +23,7 @@ SDCategory: Stratholme
 EndScriptData */
 
 #include "ScriptMgr.h"
+#include "InstanceScript.h"
 #include "ScriptedCreature.h"
 #include "stratholme.h"
 #include "Player.h"
@@ -35,30 +35,39 @@ EndScriptData */
 # Once Aurius is defeated, he should be the one summoning the ghosts.
 #####*/
 
-#define SH_GREGOR           17910
-#define SH_CATHELA          17911
-#define SH_NEMAS            17912
-#define SH_AELMAR           17913
-#define SH_VICAR            17914
-#define SH_QUEST_CREDIT     17915
+enum SH_CreatureIds
+{
+    SH_GREGOR                   = 17910,
+    SH_CATHELA                  = 17911,
+    SH_NEMAS                    = 17912,
+    SH_AELMAR                   = 17913,
+    SH_VICAR                    = 17914,
+    SH_QUEST_CREDIT             = 17915
+};
 
-#define SPELL_HOLY_LIGHT    25263
-#define SPELL_DIVINE_SHIELD 13874
+enum Spells
+{
+    SPELL_HOLY_LIGHT            = 25263,
+    SPELL_DIVINE_SHIELD         = 13874
+};
+
 class boss_silver_hand_bosses : public CreatureScript
 {
 public:
     boss_silver_hand_bosses() : CreatureScript("boss_silver_hand_bosses") { }
 
-    CreatureAI* GetAI(Creature* creature) const
-    {
-        return new boss_silver_hand_bossesAI (creature);
-    }
-
     struct boss_silver_hand_bossesAI : public ScriptedAI
     {
         boss_silver_hand_bossesAI(Creature* creature) : ScriptedAI(creature)
         {
+            Initialize();
             instance = creature->GetInstanceScript();
+        }
+
+        void Initialize()
+        {
+            HolyLight_Timer = 20000;
+            DivineShield_Timer = 20000;
         }
 
         InstanceScript* instance;
@@ -66,43 +75,36 @@ public:
         uint32 HolyLight_Timer;
         uint32 DivineShield_Timer;
 
-        void Reset()
+        void Reset() override
         {
-            HolyLight_Timer = 20000;
-            DivineShield_Timer = 20000;
+            Initialize();
 
-            if (instance)
+            switch (me->GetEntry())
             {
-                switch (me->GetEntry())
-                {
-                    case SH_AELMAR:
-                        instance->SetData(TYPE_SH_AELMAR, 0);
-                        break;
-                    case SH_CATHELA:
-                        instance->SetData(TYPE_SH_CATHELA, 0);
-                        break;
-                    case SH_GREGOR:
-                        instance->SetData(TYPE_SH_GREGOR, 0);
-                        break;
-                    case SH_NEMAS:
-                        instance->SetData(TYPE_SH_NEMAS, 0);
-                        break;
-                    case SH_VICAR:
-                        instance->SetData(TYPE_SH_VICAR, 0);
-                        break;
-                }
+                case SH_AELMAR:
+                    instance->SetData(TYPE_SH_AELMAR, 0);
+                    break;
+                case SH_CATHELA:
+                    instance->SetData(TYPE_SH_CATHELA, 0);
+                    break;
+                case SH_GREGOR:
+                    instance->SetData(TYPE_SH_GREGOR, 0);
+                    break;
+                case SH_NEMAS:
+                    instance->SetData(TYPE_SH_NEMAS, 0);
+                    break;
+                case SH_VICAR:
+                    instance->SetData(TYPE_SH_VICAR, 0);
+                    break;
             }
         }
 
-        void EnterCombat(Unit* /*who*/)
+        void JustEngagedWith(Unit* /*who*/) override
         {
         }
 
-        void JustDied(Unit* killer)
+        void JustDied(Unit* killer) override
         {
-            if (!instance)
-                return;
-
             switch (me->GetEntry())
             {
                 case SH_AELMAR:
@@ -122,14 +124,14 @@ public:
                     break;
             }
 
-            if (instance->GetData(TYPE_SH_QUEST))
+            if (killer && instance->GetData(TYPE_SH_QUEST))
             {
                 if (Player* player = killer->ToPlayer())
-                    player->KilledMonsterCredit(SH_QUEST_CREDIT, 0);
+                    player->KilledMonsterCredit(SH_QUEST_CREDIT);
             }
         }
 
-        void UpdateAI(const uint32 diff)
+        void UpdateAI(uint32 diff) override
         {
             //Return since we have no target
             if (!UpdateVictim())
@@ -156,6 +158,11 @@ public:
             DoMeleeAttackIfReady();
         }
     };
+
+    CreatureAI* GetAI(Creature* creature) const override
+    {
+        return GetStratholmeAI<boss_silver_hand_bossesAI>(creature);
+    }
 };
 
 void AddSC_boss_order_of_silver_hand()

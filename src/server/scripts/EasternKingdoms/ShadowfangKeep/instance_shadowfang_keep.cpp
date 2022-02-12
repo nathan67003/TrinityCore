@@ -1,6 +1,5 @@
 /*
- * Copyright (C) 2008-2013 TrinityCore <http://www.trinitycore.org/>
- * Copyright (C) 2006-2009 ScriptDev2 <https://scriptdev2.svn.sourceforge.net/>
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -16,269 +15,291 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-/* ScriptData
-SDName: Instance_Shadowfang_Keep
-SD%Complete: 90
-SDComment:
-SDCategory: Shadowfang Keep
-EndScriptData */
-
-#include "ScriptedCreature.h"
 #include "ScriptMgr.h"
+#include "shadowfang_keep.h"
+#include "AreaBoundary.h"
+#include "GameObject.h"
+#include "Player.h"
 #include "InstanceScript.h"
 #include "shadowfang_keep.h"
-#include "TemporarySummon.h"
+#include "Map.h"
+#include "Creature.h"
+#include "EventMap.h"
+#include "CreatureAI.h"
 
-#define MAX_ENCOUNTER              4
-
-enum eEnums
+ObjectData const creatureData[] =
 {
-    SAY_BOSS_DIE_AD         = 4,
-    SAY_BOSS_DIE_AS         = 3,
-    SAY_ARCHMAGE            = 0,
-
-    NPC_ASH                 = 3850,
-    NPC_ADA                 = 3849,
-    NPC_ARCHMAGE_ARUGAL     = 4275,
-    NPC_ARUGAL_VOIDWALKER   = 4627,
-
-    GO_COURTYARD_DOOR       = 18895,                        //door to open when talking to NPC's
-    GO_SORCERER_DOOR        = 18972,                        //door to open when Fenrus the Devourer
-    GO_ARUGAL_DOOR          = 18971,                        //door to open when Wolf Master Nandos
-
-    SPELL_ASHCROMBE_TELEPORT    = 15742
+    { BOSS_BARON_ASHBURY,               DATA_BARON_ASHBURY          },
+    { BOSS_BARON_SILVERLAINE,           DATA_BARON_SILVERLAINE      },
+    { BOSS_COMMANDER_SPRINGVALE,        DATA_COMMANDER_SPRINGVALE   },
+    { BOSS_LORD_WALDEN,                 DATA_LORD_WALDEN            },
+    { BOSS_LORD_GODFREY,                DATA_LORD_GODFREY           },
+    { NPC_DEBUG_ANNOUNCER,              DATA_DEBUG_ANNOUNCER        },
+    { 0,                                0                           } // END
 };
 
-const Position SpawnLocation[] =
+ObjectData const gameobjectData[] =
 {
-    {-148.199f, 2165.647f, 128.448f, 1.026f},
-    {-153.110f, 2168.620f, 128.448f, 1.026f},
-    {-145.905f, 2180.520f, 128.448f, 4.183f},
-    {-140.794f, 2178.037f, 128.448f, 4.090f},
-    {-138.640f, 2170.159f, 136.577f, 2.737f}
+    { GO_COURTYARD_DOOR,                DATA_COURTYARD_DOOR,        },
+    { GO_SORCERERS_DOOR,                DATA_SORCERER_GATE,         },
+    { GO_ARUGALS_LAIR,                  DATA_ARUGAL_DOOR,           },
+    { 0,                                0                           } // END
 };
+
+DoorData const doorData[] =
+{
+    { GO_ARUGALS_LAIR,                   DATA_LORD_GODFREY,              DOOR_TYPE_ROOM    },
+    { 0,                                 0,                              DOOR_TYPE_ROOM    } // END
+};
+
+BossBoundaryData const boundaries =
+{
+    { DATA_COMMANDER_SPRINGVALE,  new ParallelogramBoundary(Position(-222.75f, 2269.03f), Position(-217.60f, 2249.65f), Position(-267.47f, 2256.10f)) },
+    { DATA_LORD_WALDEN,  new CircleBoundary(Position(-146.58f, 2173.037f), 17.0) },
+};
+
+enum SpawnGroups
+{
+    SPAWN_GROUP_ENTRANCE_ALLIANCE                       = 412, // Spawned by default when Baron Ashbury is not defeated for Alliance players
+    SPAWN_GROUP_ENTRANCE_HORDE                          = 413, // Spawned by default when Baron Ashbury is not defeated for Horde players
+
+    SPAWN_GROUP_DISEASE_CLOUDS_ENTRANCE                 = 414, // Spawned by default for Horde players
+    SPAWN_GROUP_DISEASE_CLOUDS_BARON_ASHBURY            = 415, // Spawned for Horde players when Baron Ashbury has been defeated
+    SPAWN_GROUP_DISEASE_CLOUDS_BARON_SILVERLAINE        = 416, // Spawned for Horde players when Baron Silverlaine has been defeated
+    SPAWN_GROUP_DISEASE_CLOUDS_COMMANDER_SPRINGVALE     = 417, // Spawned for Horde players when Commander Springvale has been defeated
+    SPAWN_GROUP_DISEASE_CLOUDS_LORD_WALDEN              = 418, // Spawned for Horde players when Lord Walden has been defeated
+
+    SPAWN_GROUP_LORD_GODFREY_DEAD_TROUPS_ALLIANCE       = 419, // Spawned for Alliance players when Lord Walden has been defeated
+    SPAWN_GROUP_LORD_GODFREY_DEAD_TROUPS_HORDE          = 420, // Spawned for Horde players when Lord Walden has been defeated
+
+    SPAWN_GROUP_BARON_ASHBURY_TROUPS_ALLIANCE           = 421, // Spawned for Alliance players when Baron Ashbury has been defeated
+    SPAWN_GROUP_BARON_ASHBURY_TROUPS_HORDE              = 422, // Spawned for Horde players when Baron Ashbury has been defeated
+
+    SPAWN_GROUP_BARON_SILVERLAINE_TROUPS_ALLIANCE       = 423, // Spawned for Alliance players when Baron Silverlaine has been defeated
+    SPAWN_GROUP_BARON_SILVERLAINE_TROUPS_HORDE          = 424, // Spawned for Horde players when Baron Silverlaine has been defeated
+
+    SPAWN_GROUP_COMMANDER_SPRINGVALE_TROUPS_ALLIANCE    = 425, // Spawned for Alliance players when Commander Springvale has been defeated
+    SPAWN_GROUP_OUTSIDE_TROUPS_ALLIANCE                 = 426, // Spawned for Alliance players when triggering an areatrigger after defeating Commander Springvale
+    SPAWN_GROUP_LORD_WALDEN_TROUPS_ALLIANCE             = 427, // Spawned for Alliance players when Lord Walden has been defeated
+
+    SPAWN_GROUP_COMMANDER_SPRINGVALE_TROUPS_HORDE       = 428, // Spawned for Horde players when Commander Springvale or Lord Walden has been defeated
+    SPAWN_GROUP_COMMANDER_SPRINGVALE_BELMONT            = 429, // Spawned for Horde players when Commander Springvale has been defeated
+    SPAWN_GROUP_LORD_WALDEN_BELMONT                     = 430, // Spawned for Horde players when Lord Walden has been defeated
+
+    SPAWN_GROUP_LORD_GODFREY_IVAR_BLOODFANG             = 431, // Spawned for Alliance players when triggering an areatrigger near Lord Godfrey's room
+    SPAWN_GROUP_LORD_GODFREY_BELMONT                    = 432  // Spawned for Horde players when triggering an areatrigger near Lord Godfrey's room
+};
+
+struct SpawnGroupInfo
+{
+    uint32 AllianceSpawnGroup = 0;
+    uint32 HordeSpawnGroup = 0;
+    uint32 DiseaseCloudsSpawnGroup = 0;
+};
+
+std::unordered_map<uint32 /*bossStateId*/, SpawnGroupInfo> SpawnGroupsByBossStateId =
+{
+    { DATA_BARON_ASHBURY,           { SPAWN_GROUP_BARON_ASHBURY_TROUPS_ALLIANCE,        SPAWN_GROUP_BARON_ASHBURY_TROUPS_HORDE,         SPAWN_GROUP_DISEASE_CLOUDS_BARON_ASHBURY        }},
+    { DATA_BARON_SILVERLAINE,       { SPAWN_GROUP_BARON_SILVERLAINE_TROUPS_ALLIANCE,    SPAWN_GROUP_BARON_SILVERLAINE_TROUPS_HORDE,     SPAWN_GROUP_DISEASE_CLOUDS_BARON_SILVERLAINE    }},
+    { DATA_COMMANDER_SPRINGVALE,    { SPAWN_GROUP_COMMANDER_SPRINGVALE_TROUPS_ALLIANCE, SPAWN_GROUP_COMMANDER_SPRINGVALE_BELMONT,       SPAWN_GROUP_DISEASE_CLOUDS_COMMANDER_SPRINGVALE }},
+    { DATA_LORD_WALDEN,             { SPAWN_GROUP_LORD_WALDEN_TROUPS_ALLIANCE,          SPAWN_GROUP_LORD_WALDEN_BELMONT,                SPAWN_GROUP_DISEASE_CLOUDS_LORD_WALDEN          }},
+};
+
 class instance_shadowfang_keep : public InstanceMapScript
 {
 public:
-    instance_shadowfang_keep() : InstanceMapScript("instance_shadowfang_keep", 33) { }
-
-    InstanceScript* GetInstanceScript(InstanceMap* map) const
-    {
-        return new instance_shadowfang_keep_InstanceMapScript(map);
-    }
+    instance_shadowfang_keep() : InstanceMapScript(SKScriptName, 33) { }
 
     struct instance_shadowfang_keep_InstanceMapScript : public InstanceScript
     {
-        instance_shadowfang_keep_InstanceMapScript(Map* map) : InstanceScript(map) {}
-
-        uint32 m_auiEncounter[MAX_ENCOUNTER];
-        std::string str_data;
-
-        uint64 uiAshGUID;
-        uint64 uiAdaGUID;
-        uint64 uiArchmageArugalGUID;
-
-        uint64 DoorCourtyardGUID;
-        uint64 DoorSorcererGUID;
-        uint64 DoorArugalGUID;
-
-        uint8 uiPhase;
-        uint16 uiTimer;
-
-        void Initialize()
+        instance_shadowfang_keep_InstanceMapScript(InstanceMap* map) : InstanceScript(map)
         {
-            memset(&m_auiEncounter, 0, sizeof(m_auiEncounter));
-
-            uiAshGUID = 0;
-            uiAdaGUID = 0;
-            uiArchmageArugalGUID = 0;
-
-            DoorCourtyardGUID = 0;
-            DoorSorcererGUID = 0;
-            DoorArugalGUID = 0;
-
-            uiPhase = 0;
-            uiTimer = 0;
+            SetHeaders(DataHeader);
+            SetBossNumber(EncounterCount);
+            LoadDoorData(doorData);
+            LoadBossBoundaries(boundaries);
+            LoadObjectData(creatureData, gameobjectData);
         }
 
-        void OnCreatureCreate(Creature* creature)
+        void OnPlayerEnter(Player* player) override
         {
-            switch (creature->GetEntry())
+            if (!_teamInInstance.has_value())
             {
-                case NPC_ASH: uiAshGUID = creature->GetGUID(); break;
-                case NPC_ADA: uiAdaGUID = creature->GetGUID(); break;
-                case NPC_ARCHMAGE_ARUGAL: uiArchmageArugalGUID = creature->GetGUID(); break;
+                _teamInInstance = player->GetTeam();
+
+                // Setting up entrance spawns when Baron Ashbury has not been defeated yet
+                if (GetBossState(DATA_BARON_ASHBURY) != DONE)
+                    instance->SpawnGroupSpawn(*_teamInInstance == ALLIANCE ? SPAWN_GROUP_ENTRANCE_ALLIANCE : SPAWN_GROUP_ENTRANCE_HORDE);
+
+                // Setting up disease clouds based on instance progress
+                if (*_teamInInstance == HORDE)
+                {
+                    for (uint32 bossId : { DATA_BARON_ASHBURY, DATA_BARON_SILVERLAINE, DATA_COMMANDER_SPRINGVALE, DATA_LORD_WALDEN })
+                    {
+                        if (GetBossState(bossId) == DONE)
+                        {
+                            SpawnGroupInfo spawnGroupInfo = SpawnGroupsByBossStateId[bossId];
+                            instance->SpawnGroupSpawn(spawnGroupInfo.DiseaseCloudsSpawnGroup);
+                        }
+                    }
+                }
+
+                // Setting up dead troup spawns when Lord Walden has been defeated already
+                if (GetBossState(DATA_LORD_WALDEN) == DONE)
+                    instance->SpawnGroupSpawn(*_teamInInstance == ALLIANCE ? SPAWN_GROUP_LORD_GODFREY_DEAD_TROUPS_ALLIANCE : SPAWN_GROUP_LORD_GODFREY_DEAD_TROUPS_HORDE);
             }
         }
 
-        void OnGameObjectCreate(GameObject* go)
+        void OnCreatureCreate(Creature* creature) override
         {
+            InstanceScript::OnCreatureCreate(creature);
+
+            switch (creature->GetEntry())
+            {
+                case NPC_FORSAKEN_BLIGHTSPREADER:
+                    creature->SetDisplayId(creature->GetCreatureTemplate()->Modelid1);
+                    break;
+                case NPC_HIGH_WARLORD_CROMUSH:
+                    if (creature->ToTempSummon())
+                        _cromushGUID = creature->GetGUID();
+                    break;
+                case NPC_PISTOL_BARRAGE_DUMMY:
+                    if (Creature* godfrey = GetCreature(DATA_LORD_GODFREY))
+                        if (godfrey->IsAIEnabled())
+                            godfrey->AI()->JustSummoned(creature);
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        void OnGameObjectCreate(GameObject* go) override
+        {
+            InstanceScript::OnGameObjectCreate(go);
+
             switch (go->GetEntry())
             {
                 case GO_COURTYARD_DOOR:
-                    DoorCourtyardGUID = go->GetGUID();
-                    if (m_auiEncounter[0] == DONE)
-                        HandleGameObject(0, true, go);
+                    if (GetBossState(DATA_BARON_ASHBURY) == DONE)
+                        go->SetGoState(GO_STATE_ACTIVE);
                     break;
-                case GO_SORCERER_DOOR:
-                    DoorSorcererGUID = go->GetGUID();
-                    if (m_auiEncounter[2] == DONE)
-                        HandleGameObject(0, true, go);
+                case GO_SORCERERS_DOOR:
+                    if (GetBossState(DATA_LORD_WALDEN) == DONE)
+                        go->SetGoState(GO_STATE_ACTIVE);
                     break;
-                case GO_ARUGAL_DOOR:
-                    DoorArugalGUID = go->GetGUID();
-                    if (m_auiEncounter[3] == DONE)
-                        HandleGameObject(0, true, go);
+                case GO_ARUGALS_LAIR:
+                    if (GetBossState(DATA_LORD_GODFREY) != DONE)
+                        go->SetGoState(GO_STATE_READY);
+                    break;
+                default:
                     break;
             }
         }
 
-        void DoSpeech()
+        bool SetBossState(uint32 type, EncounterState state) override
         {
-            Creature* pAda = instance->GetCreature(uiAdaGUID);
-            Creature* pAsh = instance->GetCreature(uiAshGUID);
+            if (!InstanceScript::SetBossState(type, state))
+                return false;
 
-            if (pAda && pAda->isAlive() && pAsh && pAsh->isAlive())
+            if (state != DONE || type == BOSS_LORD_GODFREY)
+                return true;
+
+            SpawnGroupInfo spawnGroupInfo = SpawnGroupsByBossStateId[type];
+
+            // Clean up previous spawned groups
+            DespawnPreviousTroups();
+
+            // Spawn group linked to boss encounter
+            instance->SpawnGroupSpawn(*_teamInInstance == ALLIANCE ? spawnGroupInfo.AllianceSpawnGroup : spawnGroupInfo.HordeSpawnGroup);
+
+            // Spawn disease clouds linked to boss encounter
+            if (*_teamInInstance == HORDE)
+                instance->SpawnGroupSpawn(spawnGroupInfo.DiseaseCloudsSpawnGroup);
+
+            // Spawn dead troups after defeating Lord Walden
+            if (type == DATA_LORD_WALDEN)
+                instance->SpawnGroupSpawn(*_teamInInstance == ALLIANCE ? SPAWN_GROUP_LORD_GODFREY_DEAD_TROUPS_ALLIANCE : SPAWN_GROUP_LORD_GODFREY_DEAD_TROUPS_HORDE);
+
+            // Special case for Commander Springvale Horde troups
+            if (*_teamInInstance == HORDE)
             {
-                pAda->AI()->Talk(SAY_BOSS_DIE_AD);
-                pAsh->AI()->Talk(SAY_BOSS_DIE_AS);
+                if ((type == DATA_LORD_WALDEN && GetBossState(DATA_COMMANDER_SPRINGVALE) != DONE)
+                    || (type == DATA_COMMANDER_SPRINGVALE && GetBossState(DATA_LORD_WALDEN) != DONE))
+                    instance->SpawnGroupSpawn(SPAWN_GROUP_COMMANDER_SPRINGVALE_TROUPS_HORDE);
             }
+
+            return true;
         }
 
-        void SetData(uint32 type, uint32 data)
+        void SetData(uint32 type, uint32 /*value*/) override
         {
             switch (type)
             {
-                case TYPE_FREE_NPC:
-                    if (data == DONE)
-                        DoUseDoorOrButton(DoorCourtyardGUID);
-                    m_auiEncounter[0] = data;
+                case DATA_OUTSIDE_TROUPS_SPAWN:
+                    if (*_teamInInstance == ALLIANCE)
+                        instance->SpawnGroupSpawn(SPAWN_GROUP_OUTSIDE_TROUPS_ALLIANCE);
                     break;
-                case TYPE_RETHILGORE:
-                    if (data == DONE)
-                        DoSpeech();
-                    m_auiEncounter[1] = data;
-                    break;
-                case TYPE_FENRUS:
-                    switch (data)
+                case DATA_GODFREY_INTRO_SPAWN:
+                    if (*_teamInInstance == ALLIANCE)
+                        instance->SpawnGroupDespawn(SPAWN_GROUP_LORD_WALDEN_TROUPS_ALLIANCE);
+                    else
                     {
-                        case DONE:
-                            uiTimer = 1000;
-                            uiPhase = 1;
-                            break;
-                        case 7:
-                            DoUseDoorOrButton(DoorSorcererGUID);
-                            break;
+                        instance->SpawnGroupDespawn(SPAWN_GROUP_COMMANDER_SPRINGVALE_TROUPS_HORDE);
+                        instance->SpawnGroupDespawn(SPAWN_GROUP_LORD_WALDEN_BELMONT);
                     }
-                    m_auiEncounter[2] = data;
+
+                    instance->SpawnGroupSpawn(*_teamInInstance == ALLIANCE ? SPAWN_GROUP_LORD_GODFREY_IVAR_BLOODFANG : SPAWN_GROUP_LORD_GODFREY_BELMONT);
                     break;
-                case TYPE_NANDOS:
-                    if (data == DONE)
-                        DoUseDoorOrButton(DoorArugalGUID);
-                    m_auiEncounter[3] = data;
+                default:
                     break;
-            }
-
-            if (data == DONE)
-            {
-                OUT_SAVE_INST_DATA;
-
-                std::ostringstream saveStream;
-                saveStream << m_auiEncounter[0] << ' ' << m_auiEncounter[1] << ' ' << m_auiEncounter[2] << ' ' << m_auiEncounter[3];
-
-                str_data = saveStream.str();
-
-                SaveToDB();
-                OUT_SAVE_INST_DATA_COMPLETE;
             }
         }
 
-        uint32 GetData(uint32 type) const
+        uint32 GetData(uint32 type) const override
         {
             switch (type)
             {
-                case TYPE_FREE_NPC:
-                    return m_auiEncounter[0];
-                case TYPE_RETHILGORE:
-                    return m_auiEncounter[1];
-                case TYPE_FENRUS:
-                    return m_auiEncounter[2];
-                case TYPE_NANDOS:
-                    return m_auiEncounter[3];
+                case DATA_TEAM_IN_INSTANCE:
+                    return *_teamInInstance;
+                default:
+                    break;
             }
             return 0;
         }
 
-        std::string GetSaveData()
+        void DespawnPreviousTroups()
         {
-            return str_data;
-        }
-
-        void Load(const char* in)
-        {
-            if (!in)
+            if (*_teamInInstance == ALLIANCE)
             {
-                OUT_LOAD_INST_DATA_FAIL;
-                return;
+                instance->SpawnGroupDespawn(SPAWN_GROUP_ENTRANCE_ALLIANCE);
+                instance->SpawnGroupDespawn(SPAWN_GROUP_BARON_ASHBURY_TROUPS_ALLIANCE);
+                instance->SpawnGroupDespawn(SPAWN_GROUP_BARON_SILVERLAINE_TROUPS_ALLIANCE);
+                instance->SpawnGroupDespawn(SPAWN_GROUP_COMMANDER_SPRINGVALE_TROUPS_ALLIANCE);
+                instance->SpawnGroupDespawn(SPAWN_GROUP_OUTSIDE_TROUPS_ALLIANCE);
             }
-
-            OUT_LOAD_INST_DATA(in);
-
-            std::istringstream loadStream(in);
-            loadStream >> m_auiEncounter[0] >> m_auiEncounter[1] >> m_auiEncounter[2] >> m_auiEncounter[3];
-
-            for (uint8 i = 0; i < MAX_ENCOUNTER; ++i)
+            else
             {
-                if (m_auiEncounter[i] == IN_PROGRESS)
-                    m_auiEncounter[i] = NOT_STARTED;
-            }
+                instance->SpawnGroupDespawn(SPAWN_GROUP_ENTRANCE_HORDE);
+                instance->SpawnGroupDespawn(SPAWN_GROUP_BARON_ASHBURY_TROUPS_HORDE);
+                instance->SpawnGroupDespawn(SPAWN_GROUP_BARON_SILVERLAINE_TROUPS_HORDE);
+                instance->SpawnGroupDespawn(SPAWN_GROUP_COMMANDER_SPRINGVALE_BELMONT);
 
-            OUT_LOAD_INST_DATA_COMPLETE;
-        }
-
-        void Update(uint32 uiDiff)
-        {
-            if (GetData(TYPE_FENRUS) != DONE)
-                return;
-
-            Creature* pArchmage = instance->GetCreature(uiArchmageArugalGUID);
-
-            if (!pArchmage || !pArchmage->isAlive())
-                return;
-
-            if (uiPhase)
-            {
-                if (uiTimer <= uiDiff)
-                {
-                    switch (uiPhase)
-                    {
-                        case 1:
-                        {
-                            Creature* summon = pArchmage->SummonCreature(pArchmage->GetEntry(), SpawnLocation[4], TEMPSUMMON_TIMED_DESPAWN, 10000);
-                            summon->SetFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_IMMUNE_TO_PC);
-                            summon->SetReactState(REACT_DEFENSIVE);
-                            summon->CastSpell(summon, SPELL_ASHCROMBE_TELEPORT, true);
-                            summon->AI()->Talk(SAY_ARCHMAGE);
-                            uiTimer = 2000;
-                            uiPhase = 2;
-                            break;
-                        }
-                        case 2:
-                        {
-                            pArchmage->SummonCreature(NPC_ARUGAL_VOIDWALKER, SpawnLocation[0], TEMPSUMMON_CORPSE_TIMED_DESPAWN, 60000);
-                            pArchmage->SummonCreature(NPC_ARUGAL_VOIDWALKER, SpawnLocation[1], TEMPSUMMON_CORPSE_TIMED_DESPAWN, 60000);
-                            pArchmage->SummonCreature(NPC_ARUGAL_VOIDWALKER, SpawnLocation[2], TEMPSUMMON_CORPSE_TIMED_DESPAWN, 60000);
-                            pArchmage->SummonCreature(NPC_ARUGAL_VOIDWALKER, SpawnLocation[3], TEMPSUMMON_CORPSE_TIMED_DESPAWN, 60000);
-                            uiPhase = 0;
-                            break;
-                        }
-
-                    }
-                } else uiTimer -= uiDiff;
+                // Despawn the summoned Cromush version as he is not a part of the spawn groups
+                if (Creature* cromush = instance->GetCreature(_cromushGUID))
+                    cromush->DespawnOrUnsummon();
             }
         }
+
+        protected:
+            EventMap events;
+            Optional<uint32>_teamInInstance;
+            ObjectGuid _cromushGUID;
     };
 
+    InstanceScript* GetInstanceScript(InstanceMap* map) const override
+    {
+        return new instance_shadowfang_keep_InstanceMapScript(map);
+    }
 };
 
 void AddSC_instance_shadowfang_keep()

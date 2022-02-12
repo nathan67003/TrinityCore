@@ -1,6 +1,5 @@
 /*
- * Copyright (C) 2008-2013 TrinityCore <http://www.trinitycore.org/>
- * Copyright (C) 2006-2009 ScriptDev2 <https://scriptdev2.svn.sourceforge.net/>
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -16,145 +15,215 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-/* ScriptData
-SDName: Instance_ZulGurub
-SD%Complete: 80
-SDComment: Missing reset function after killing a boss for Ohgan, Thekal.
-SDCategory: Zul'Gurub
-EndScriptData */
-
 #include "ScriptMgr.h"
+#include "AreaBoundary.h"
+#include "Creature.h"
+#include "GameObject.h"
 #include "InstanceScript.h"
+#include "CreatureAI.h"
+#include "Map.h"
 #include "zulgurub.h"
+
+ObjectData const creatureData[] =
+{
+    { BOSS_HIGH_PRIEST_VENOXIS,         DATA_HIGH_PRIEST_VENOXIS                },
+    { BOSS_BLOODLORD_MANDOKIR,          DATA_BLOODLORD_MANDOKIR                 },
+    { BOSS_HIGH_PRIESTESS_KILNARA,      DATA_HIGH_PRIESTESS_KILNARA             },
+    { BOSS_ZANZIL,                      DATA_ZANZIL                             },
+    { BOSS_JINDO_THE_GODBREAKER,        DATA_JINDO_THE_GODBREAKER               },
+    { NPC_OHGAN,                        DATA_OHGAN                              },
+    { NPC_SPIRIT_OF_HAKKAR,             DATA_SPIRIT_OF_HAKKAR                   },
+    { NPC_SHADOW_OF_HAKKAR,             DATA_SHADOW_OF_HAKKAR                   },
+    { NPC_JINDO_THE_GODBREAKER,         DATA_JINDO_THE_GODBREAKER_SPIRIT_WORLD  },
+    { 0,                                0                                       }  // END
+};
+
+DoorData const doorData[] =
+{
+    { GO_VENOXIS_COIL,                  DATA_HIGH_PRIEST_VENOXIS,       DOOR_TYPE_ROOM },
+    { GO_ARENA_DOOR_1,                  DATA_BLOODLORD_MANDOKIR,        DOOR_TYPE_ROOM },
+    { GO_FORCEFIELD,                    DATA_HIGH_PRIESTESS_KILNARA,    DOOR_TYPE_ROOM },
+    { GO_ZANZIL_DOOR,                   DATA_ZANZIL,                    DOOR_TYPE_ROOM },
+    //{ GO_THE_CACHE_OF_MADNESS_DOOR,     DATA_xxxxxxx,                     DOOR_TYPE_ROOM },
+    { 0,                                0,                              DOOR_TYPE_ROOM }  // END
+};
+
+BossBoundaryData const boundaries =
+{
+    { DATA_HIGH_PRIEST_VENOXIS,  new CircleBoundary(Position(-12000.50f, -1695.389f), 38.0f) }
+};
 
 class instance_zulgurub : public InstanceMapScript
 {
     public:
-        instance_zulgurub()
-            : InstanceMapScript("instance_zulgurub", 309)
-        {
-        }
+        instance_zulgurub() : InstanceMapScript(ZGScriptName, 859) { }
 
         struct instance_zulgurub_InstanceMapScript : public InstanceScript
         {
-            instance_zulgurub_InstanceMapScript(Map* map) : InstanceScript(map) {}
-
-            //If all High Priest bosses were killed. Lorkhan, Zath and Ohgan are added too.
-            uint32 m_auiEncounter[MAX_ENCOUNTERS];
-
-            //Storing Lorkhan, Zath and Thekal because we need to cast on them later. Jindo is needed for healfunction too.
-            uint64 m_uiLorKhanGUID;
-            uint64 m_uiZathGUID;
-            uint64 m_uiThekalGUID;
-            uint64 m_uiJindoGUID;
-
-            void Initialize()
+            instance_zulgurub_InstanceMapScript(InstanceMap* map) : InstanceScript(map)
             {
-                memset(&m_auiEncounter, 0, sizeof(m_auiEncounter));
-
-                m_uiLorKhanGUID = 0;
-                m_uiZathGUID = 0;
-                m_uiThekalGUID = 0;
-                m_uiJindoGUID = 0;
+                SetHeaders(DataHeader);
+                SetBossNumber(EncounterCount);
+                LoadObjectData(creatureData, nullptr);
+                LoadDoorData(doorData);
+                LoadBossBoundaries(boundaries);
+                _defeatedBossesCount = 0;
+                _killedGurubashiSpiritWarriorMask = 0;
             }
 
-            bool IsEncounterInProgress() const
+            void OnCreatureCreate(Creature* creature) override
             {
-                //not active in Zul'Gurub
-                return false;
-            }
+                InstanceScript::OnCreatureCreate(creature);
 
-            void OnCreatureCreate(Creature* creature)
-            {
                 switch (creature->GetEntry())
                 {
-                    case 11347: m_uiLorKhanGUID = creature->GetGUID(); break;
-                    case 11348: m_uiZathGUID = creature->GetGUID(); break;
-                    case 14509: m_uiThekalGUID = creature->GetGUID(); break;
-                    case 11380: m_uiJindoGUID = creature->GetGUID(); break;
+                    case NPC_VENOMOUS_EFFUSION:
+                    case NPC_BLOODVENOM:
+                        if (Creature* venoxis = GetCreature(DATA_HIGH_PRIEST_VENOXIS))
+                            venoxis->AI()->JustSummoned(creature);
+                        break;
+                    case NPC_DEVASTATING_SLAM:
+                        if (Creature* mandokir = GetCreature(DATA_BLOODLORD_MANDOKIR))
+                            mandokir->AI()->JustSummoned(creature);
+                        break;
+                    case NPC_CAVE_IN_STALKER:
+                        _caveInStalkerGUIDs.push_back(creature->GetGUID());
+                        break;
+                    case NPC_TOXIC_VENOMSPITTER:
+                    case NPC_MUTATED_OVERGROWTH:
+                        _poisonPlantGUIDs.push_back(creature->GetGUID());
+                        if (GetBossState(DATA_HIGH_PRIEST_VENOXIS) != DONE)
+                            creature->CastSpell(creature, SPELL_POISON_CLOUD);
+                        break;
+                    case BOSS_JINDO_THE_GODBREAKER:
+                        creature->setActive(true);
+
+                        if (_defeatedBossesCount >= 2)
+                        {
+                            creature->RemoveFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_IMMUNE_TO_NPC | UNIT_FLAG_IMMUNE_TO_PC | UNIT_FLAG_NOT_SELECTABLE);
+                            creature->RemoveAurasDueToSpell(SPELL_COSMETIC_ALPHA_STATE_25_PCT);
+                        }
+                        break;
+                    case NPC_JINDO_THE_GODBREAKER:
+                    case NPC_SPIRIT_OF_HAKKAR:
+                    case NPC_SHADOW_OF_HAKKAR:
+                    case NPC_HAKKARS_CHAINS:
+                    case NPC_TWISTED_SPIRIT:
+                    case NPC_TWISTED_SHADOW:
+                    case NPC_GURUBASHI_SPIRIT_WARRIOR:
+                    case NPC_GURUBASHI_SHADOW:
+                    case NPC_GURUBASHI_SPIRIT:
+                    case NPC_SPIRIT_PORTAL:
+                        if (Creature* jindo = GetCreature(DATA_JINDO_THE_GODBREAKER))
+                            jindo->AI()->JustSummoned(creature);
+                        break;
+                    default:
+                        break;
                 }
             }
 
-            void SetData(uint32 uiType, uint32 uiData)
+            void OnGameObjectCreate(GameObject* go) override
             {
-                switch (uiType)
+                InstanceScript::OnGameObjectCreate(go);
+            }
+
+            void OnUnitDeath(Unit* unit) override
+            {
+                if (unit->GetTypeId() != TYPEID_UNIT)
+                    return;
+
+                switch (unit->GetEntry())
                 {
-                    case DATA_ARLOKK:
-                        m_auiEncounter[0] = uiData;
+                    case NPC_HAKKARS_CHAINS:
+                        if (Creature* jindo = GetCreature(DATA_JINDO_THE_GODBREAKER))
+                            jindo->AI()->SummonedCreatureDies(unit->ToCreature(), nullptr);
                         break;
-
-                    case DATA_JEKLIK:
-                        m_auiEncounter[1] = uiData;
-                        break;
-
-                    case DATA_VENOXIS:
-                        m_auiEncounter[2] = uiData;
-                        break;
-
-                    case DATA_MARLI:
-                        m_auiEncounter[3] = uiData;
-                        break;
-
-                    case DATA_THEKAL:
-                        m_auiEncounter[4] = uiData;
-                        break;
-
-                    case DATA_LORKHAN:
-                        m_auiEncounter[5] = uiData;
-                        break;
-
-                    case DATA_ZATH:
-                        m_auiEncounter[6] = uiData;
-                        break;
-
-                    case DATA_OHGAN:
-                        m_auiEncounter[7] = uiData;
+                    default:
                         break;
                 }
             }
 
-            uint32 GetData(uint32 uiType) const
+            bool SetBossState(uint32 type, EncounterState state) override
             {
-                switch (uiType)
+                if (!InstanceScript::SetBossState(type, state))
+                    return false;
+
+                switch (type)
                 {
-                    case DATA_ARLOKK:
-                        return m_auiEncounter[0];
-                    case DATA_JEKLIK:
-                        return m_auiEncounter[1];
-                    case DATA_VENOXIS:
-                        return m_auiEncounter[2];
-                    case DATA_MARLI:
-                        return m_auiEncounter[3];
-                    case DATA_THEKAL:
-                        return m_auiEncounter[4];
-                    case DATA_LORKHAN:
-                        return m_auiEncounter[5];
-                    case DATA_ZATH:
-                        return m_auiEncounter[6];
-                    case DATA_OHGAN:
-                        return m_auiEncounter[7];
+                    case DATA_HIGH_PRIEST_VENOXIS:
+                        if (state == DONE)
+                            for (ObjectGuid guid : _poisonPlantGUIDs)
+                                if (Creature* plant = instance->GetCreature(guid))
+                                    plant->RemoveAurasDueToSpell(SPELL_POISON_CLOUD);
+                        break;
+                    default:
+                        break;
+                }
+
+                if (state == DONE)
+                {
+                    _defeatedBossesCount++;
+
+                    if (_defeatedBossesCount >= 2)
+                        if (Creature* jindo = GetCreature(DATA_JINDO_THE_GODBREAKER))
+                            jindo->AI()->DoAction(ACTION_TRIGGER_JINDO_INTRO);
+
+                    SaveToDB();
+                }
+
+                return true;
+            }
+
+            void SetData(uint32 type, uint32 data) override
+            {
+                switch (type)
+                {
+                    case DATA_CAST_CAVE_IN_VISUAL:
+                        for (ObjectGuid guid : _caveInStalkerGUIDs)
+                            if (Creature* stalker = instance->GetCreature(guid))
+                                stalker->CastSpell(stalker, SPELL_CAVE_IN_VISUAL, false);
+                        break;
+                    case DATA_KILLED_GURUBASHI_SPIRIT_WARRIORS:
+                        _killedGurubashiSpiritWarriorMask = data;
+                        SaveToDB();
+                        break;
+                    default:
+                        break;
+                }
+            }
+
+            uint32 GetData(uint32 type) const override
+            {
+                switch (type)
+                {
+                    case DATA_KILLED_GURUBASHI_SPIRIT_WARRIORS:
+                        return _killedGurubashiSpiritWarriorMask;
+                    default:
+                        return 0;
                 }
                 return 0;
             }
 
-            uint64 GetData64(uint32 uiData) const
+            void WriteSaveDataMore(std::ostringstream& data) override
             {
-                switch (uiData)
-                {
-                    case DATA_LORKHAN:
-                        return m_uiLorKhanGUID;
-                    case DATA_ZATH:
-                        return m_uiZathGUID;
-                    case DATA_THEKAL:
-                        return m_uiThekalGUID;
-                    case DATA_JINDO:
-                        return m_uiJindoGUID;
-                }
-                return 0;
+                data << _defeatedBossesCount << ' '
+                    << _killedGurubashiSpiritWarriorMask;
             }
+
+            void ReadSaveDataMore(std::istringstream& data) override
+            {
+                data >> _defeatedBossesCount;
+                data >> _killedGurubashiSpiritWarriorMask;
+            }
+
+        private:
+            GuidVector _caveInStalkerGUIDs;
+            GuidVector _poisonPlantGUIDs;
+            uint8 _defeatedBossesCount;
+            uint8 _killedGurubashiSpiritWarriorMask;
         };
 
-        InstanceScript* GetInstanceScript(InstanceMap* map) const
+        InstanceScript* GetInstanceScript(InstanceMap* map) const override
         {
             return new instance_zulgurub_InstanceMapScript(map);
         }

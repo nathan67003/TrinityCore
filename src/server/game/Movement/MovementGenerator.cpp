@@ -1,6 +1,5 @@
 /*
- * Copyright (C) 2008-2013 TrinityCore <http://www.trinitycore.org/>
- * Copyright (C) 2005-2009 MaNGOS <http://getmangos.com/>
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -17,7 +16,20 @@
  */
 
 #include "MovementGenerator.h"
+#include "IdleMovementGenerator.h"
+#include "Unit.h"
+#include "UnitAI.h"
 
-MovementGenerator::~MovementGenerator()
+MovementGenerator::~MovementGenerator() { }
+
+MovementGenerator* IdleMovementFactory::Create(Unit* /*object*/) const
 {
+    static IdleMovementGenerator instance;
+    return &instance;
+}
+
+void MovementGenerator::NotifyAIOnFinalize(Unit* object)
+{
+    if (UnitAI* ai = object->GetAI())
+        ai->OnMovementGeneratorFinalized(GetMovementGeneratorType());
 }

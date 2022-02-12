@@ -1,6 +1,5 @@
 /*
- * Copyright (C) 2008-2013 TrinityCore <http://www.trinitycore.org/>
- * Copyright (C) 2005-2009 MaNGOS <http://getmangos.com/>
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -20,55 +19,81 @@
 #define TRINITY_GAMEOBJECTAI_H
 
 #include "Define.h"
-#include <list>
-#include "Object.h"
-#include "GameObject.h"
-#include "CreatureAI.h"
+#include "ObjectGuid.h"
+#include "Optional.h"
+#include "QuestDef.h"
 
-class GameObjectAI
+class GameObject;
+class Unit;
+class SpellInfo;
+
+class TC_GAME_API GameObjectAI
 {
     protected:
-        GameObject* const go;
+        GameObject* const me;
     public:
-        explicit GameObjectAI(GameObject* g) : go(g) {}
-        virtual ~GameObjectAI() {}
+        explicit GameObjectAI(GameObject* g) : me(g) { }
+        virtual ~GameObjectAI() { }
 
-        virtual void UpdateAI(uint32 /*diff*/) {}
+        virtual void UpdateAI(uint32 /*diff*/) { }
 
         virtual void InitializeAI() { Reset(); }
 
         virtual void Reset() { }
 
+        virtual void JustAppeared() { }
+
         // Pass parameters between AI
-        virtual void DoAction(const int32 /*param = 0 */) {}
-        virtual void SetGUID(uint64 /*guid*/, int32 /*id = 0 */) {}
-        virtual uint64 GetGUID(int32 /*id = 0 */) const { return 0; }
+        virtual void DoAction(int32 /*param = 0 */) { }
+        virtual void SetGUID(ObjectGuid const& /*guid*/, int32 /*id = 0 */) { }
+        virtual ObjectGuid GetGUID(int32 /*id = 0 */) const { return ObjectGuid::Empty; }
 
-        static int Permissible(GameObject const* go);
+        static int32 Permissible(GameObject const* go);
 
+        // Called when the dialog status between a player and the gameobject is requested.
+        virtual Optional<QuestGiverStatus> GetDialogStatus(Player* /*player*/) { return std::nullopt; }
+
+        // Called when a player opens a gossip dialog with the gameobject.
         virtual bool GossipHello(Player* /*player*/) { return false; }
-        virtual bool GossipSelect(Player* /*player*/, uint32 /*sender*/, uint32 /*action*/) { return false; }
-        virtual bool GossipSelectCode(Player* /*player*/, uint32 /*sender*/, uint32 /*action*/, char const* /*code*/) { return false; }
-        virtual bool QuestAccept(Player* /*player*/, Quest const* /*quest*/) { return false; }
-        virtual bool QuestReward(Player* /*player*/, Quest const* /*quest*/, uint32 /*opt*/) { return false; }
-        virtual uint32 GetDialogStatus(Player* /*player*/) { return 100; }
-        virtual void Destroyed(Player* /*player*/, uint32 /*eventId*/) {}
+
+        // Called when a player selects a gossip item in the gameobject's gossip menu.
+        virtual bool GossipSelect(Player* /*player*/, uint32 /*menuId*/, uint32 /*gossipListId*/) { return false; }
+
+        // Called when a player selects a gossip with a code in the gameobject's gossip menu.
+        virtual bool GossipSelectCode(Player* /*player*/, uint32 /*menuId*/, uint32 /*gossipListId*/, char const* /*code*/) { return false; }
+
+        // Called when a player accepts a quest from the gameobject.
+        virtual void QuestAccept(Player* /*player*/, Quest const* /*quest*/) { }
+
+        // Called when a player completes a quest and is rewarded, opt is the selected item's index or 0
+        virtual void QuestReward(Player* /*player*/, Quest const* /*quest*/, uint32 /*opt*/) { }
+
+        // Called when a Player clicks a GameObject, before GossipHello
+        // prevents achievement tracking if returning true
+        virtual bool OnReportUse(Player* /*player*/) { return false; }
+
+        virtual void Destroyed(Player* /*player*/, uint32 /*eventId*/) { }
+        virtual void Damaged(Player* /*player*/, uint32 /*eventId*/) { }
+
         virtual uint32 GetData(uint32 /*id*/) const { return 0; }
-        virtual void SetData64(uint32 /*id*/, uint64 /*value*/) {}
+        virtual void SetData64(uint32 /*id*/, uint64 /*value*/) { }
         virtual uint64 GetData64(uint32 /*id*/) const { return 0; }
-        virtual void SetData(uint32 /*id*/, uint32 /*value*/) {}
-        virtual void OnGameEvent(bool /*start*/, uint16 /*eventId*/) {}
-        virtual void OnStateChanged(uint32 /*state*/, Unit* /*unit*/) {}
-        virtual void EventInform(uint32 /*eventId*/) {}
+        virtual void SetData(uint32 /*id*/, uint32 /*value*/) { }
+
+        virtual void OnGameEvent(bool /*start*/, uint16 /*eventId*/) { }
+        virtual void OnLootStateChanged(uint32 /*state*/, Unit* /*unit*/) { }
+        virtual void OnStateChanged(uint32 /*state*/) { }
+        virtual void EventInform(uint32 /*eventId*/) { }
+        virtual void SpellHit(Unit* /*unit*/, SpellInfo const* /*spellInfo*/) { }
 };
 
-class NullGameObjectAI : public GameObjectAI
+class TC_GAME_API NullGameObjectAI : public GameObjectAI
 {
     public:
         explicit NullGameObjectAI(GameObject* g);
 
-        void UpdateAI(uint32 /*diff*/) {}
+        void UpdateAI(uint32 /*diff*/) override { }
 
-        static int Permissible(GameObject const* /*go*/) { return PERMIT_BASE_IDLE; }
+        static int32 Permissible(GameObject const* go);
 };
 #endif

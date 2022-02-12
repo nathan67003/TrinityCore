@@ -1,6 +1,5 @@
 /*
- * Copyright (C) 2008-2013 TrinityCore <http://www.trinitycore.org/>
- * Copyright (C) 2005-2009 MaNGOS <http://getmangos.com/>
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -26,23 +25,28 @@ enum PetType
     MAX_PET_TYPE            = 4
 };
 
-#define MAX_PET_STABLES         4
+#define MAX_PET_STABLES 20
 
 // stored in character_pet.slot
 enum PetSaveMode
 {
-    PET_SAVE_AS_DELETED        = -1,                        // not saved in fact
-    PET_SAVE_AS_CURRENT        =  0,                        // in current slot (with player)
-    PET_SAVE_FIRST_STABLE_SLOT =  1,
-    PET_SAVE_LAST_STABLE_SLOT  =  MAX_PET_STABLES,          // last in DB stable slot index (including), all higher have same meaning as PET_SAVE_NOT_IN_SLOT
-    PET_SAVE_NOT_IN_SLOT       =  100                       // for avoid conflict with stable size grow will use 100
+    PET_SAVE_AS_DELETED        = -1,  // removes pet from DB and erases from playerPetDataStore
+    PET_SAVE_UPADTE_SLOT       =  0,  // not used yet
+    PET_SAVE_CURRENT_STATE     =  1,  // Saves everything like it is atm, current = true
+    PET_SAVE_DISMISS           =  2,  // Saves everything like it is atm, removes auras and current = false
+    PET_SAVE_LOGOUT            =  3,  // Saves everything like it is atm, removes auras and current = true
+    PET_SAVE_NEW_PET           =  4,   // Saves everything like it is atm, current = true and pushes new into playerPetDataStore
+    PET_SAVE_TEMP_UNSUMMON = PET_SAVE_LOGOUT
 };
 
-enum HappinessState
+enum PetStableSlot
 {
-    UNHAPPY = 1,
-    CONTENT = 2,
-    HAPPY   = 3
+    PET_SLOT_FIRST             = 0,
+    PET_SLOT_LAST              = 20,
+    PET_SLOT_FIRST_ACTIVE_SLOT = PET_SLOT_FIRST,
+    PET_SLOT_LAST_ACTIVE_SLOT  = 4,
+    PET_SLOT_FIRST_STABLE_SLOT = 5,
+    PET_SLOT_LAST_STABLE_SLOT  = PET_SLOT_LAST
 };
 
 enum PetSpellState
@@ -74,7 +78,9 @@ enum PetTalk
     PET_TALK_ATTACK         = 1
 };
 
-#define PET_FOLLOW_DIST  1.0f
-#define PET_FOLLOW_ANGLE (M_PI/2)
+// Used by companions (minipets) and quest slot summons
+constexpr float DEFAULT_FOLLOW_DISTANCE = 2.5f;
+constexpr float DEFAULT_FOLLOW_DISTANCE_PET = 3.f;
+constexpr float DEFAULT_FOLLOW_ANGLE = float(M_PI);
 
 #endif

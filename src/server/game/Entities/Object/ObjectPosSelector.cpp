@@ -1,6 +1,5 @@
 /*
- * Copyright (C) 2008-2013 TrinityCore <http://www.trinitycore.org/>
- * Copyright (C) 2005-2009 MaNGOS <http://getmangos.com/>
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -21,7 +20,7 @@
 ObjectPosSelector::ObjectPosSelector(float x, float y, float size, float dist)
 : m_center_x(x), m_center_y(y), m_size(size), m_dist(dist)
 {
-    m_anglestep = acos(m_dist/(m_dist+2*m_size));
+    m_anglestep = std::acos(m_dist/(m_dist+2*m_size));
 
     m_nextUsedPos[USED_POS_PLUS]  = m_UsedPosLists[USED_POS_PLUS].end();
     m_nextUsedPos[USED_POS_MINUS] = m_UsedPosLists[USED_POS_MINUS].end();
@@ -32,8 +31,8 @@ ObjectPosSelector::ObjectPosSelector(float x, float y, float size, float dist)
     m_smallStepOk[USED_POS_PLUS]  = false;
     m_smallStepOk[USED_POS_MINUS] = false;
 
-    m_smallStepNextUsedPos[USED_POS_PLUS]  = NULL;
-    m_smallStepNextUsedPos[USED_POS_MINUS] = NULL;
+    m_smallStepNextUsedPos[USED_POS_PLUS]  = nullptr;
+    m_smallStepNextUsedPos[USED_POS_MINUS] = nullptr;
 }
 
 ObjectPosSelector::UsedPosList::value_type const* ObjectPosSelector::nextUsedPos(UsedPosType uptype)
@@ -47,7 +46,7 @@ ObjectPosSelector::UsedPosList::value_type const* ObjectPosSelector::nextUsedPos
         if (!m_UsedPosLists[~uptype].empty())
             return &*m_UsedPosLists[~uptype].rbegin();
         else
-            return NULL;
+            return nullptr;
     }
     else
         return &*itr;

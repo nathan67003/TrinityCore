@@ -1,6 +1,5 @@
 /*
- * Copyright (C) 2008-2013 TrinityCore <http://www.trinitycore.org/>
- * Copyright (C) 2006-2009 ScriptDev2 <https://scriptdev2.svn.sourceforge.net/>
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -16,67 +15,87 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-/* ScriptData
-SDName: Boss_Houndmaster_Loksey
-SD%Complete: 100
-SDComment:
-SDCategory: Scarlet Monastery
-EndScriptData */
-
+#include "scarlet_monastery.h"
+#include "InstanceScript.h"
+#include "Map.h"
 #include "ScriptMgr.h"
 #include "ScriptedCreature.h"
 
-enum eEnums
+enum Yells
 {
-    SAY_AGGRO                       = 0,
-    SPELL_SUMMONSCARLETHOUND        = 17164,
-    SPELL_BLOODLUST                 = 6742
+    SAY_AGGRO = 0
 };
 
-class boss_houndmaster_loksey : public CreatureScript
+enum Spells
 {
-public:
-    boss_houndmaster_loksey() : CreatureScript("boss_houndmaster_loksey") { }
+    SPELL_BATTLE_SHOUT  = 77808,
+    SPELL_BLOODLUST     = 6742
+};
 
-    CreatureAI* GetAI(Creature* creature) const
+enum Events
+{
+    EVENT_BATTLE_SHOUT = 1,
+    EVENT_BLOODLUST
+};
+
+enum SpawnGroups
+{
+    SPAWN_GROUP_ID_HOUNDS = 433
+};
+
+struct boss_houndmaster_loksey : public BossAI
+{
+    boss_houndmaster_loksey(Creature* creature) : BossAI(creature, DATA_HOUNDMASTER_LOKSEY) { }
+
+    void Reset() override
     {
-        return new boss_houndmaster_lokseyAI (creature);
+       BossAI::Reset();
+
+       // The dogs will respawn after a wipe
+       instance->instance->SpawnGroupSpawn(SPAWN_GROUP_ID_HOUNDS, true);
     }
 
-    struct boss_houndmaster_lokseyAI : public ScriptedAI
+    void JustEngagedWith(Unit* who) override
     {
-        boss_houndmaster_lokseyAI(Creature* creature) : ScriptedAI(creature) {}
+        BossAI::JustEngagedWith(who);
+        Talk(SAY_AGGRO);
+        events.ScheduleEvent(EVENT_BATTLE_SHOUT, 7s);
+        events.ScheduleEvent(EVENT_BLOODLUST, 10s);
+    }
 
-        uint32 BloodLust_Timer;
+    void UpdateAI(uint32 diff) override
+    {
+        if (!UpdateVictim())
+            return;
 
-        void Reset()
+        events.Update(diff);
+
+        if (me->HasUnitState(UNIT_STATE_CASTING))
+            return;
+
+        while (uint32 eventId = events.ExecuteEvent())
         {
-            BloodLust_Timer = 20000;
-        }
-
-        void EnterCombat(Unit* /*who*/)
-        {
-            Talk(SAY_AGGRO);
-        }
-
-        void UpdateAI(const uint32 diff)
-        {
-            if (!UpdateVictim())
-                return;
-
-            if (BloodLust_Timer <= diff)
+            switch (eventId)
             {
-                DoCast(me, SPELL_BLOODLUST);
-                BloodLust_Timer = 20000;
+                case EVENT_BATTLE_SHOUT:
+                    DoCastAOE(SPELL_BATTLE_SHOUT);
+                    events.Repeat(17s, 20s);
+                    break;
+                case EVENT_BLOODLUST:
+                    if (Creature* hound = me->FindNearestCreature(NPC_SCARLET_TRACKING_HOUND, 10.f, true))
+                        DoCast(hound, SPELL_BLOODLUST);
+                    events.Repeat(46s);
+                    break;
+                default:
+                    break;
             }
-            else BloodLust_Timer -= diff;
-
-            DoMeleeAttackIfReady();
         }
-    };
+
+        DoMeleeAttackIfReady();
+    }
 };
 
 void AddSC_boss_houndmaster_loksey()
 {
-    new boss_houndmaster_loksey();
+    RegisterScarletMonasteryCreatureAI(boss_houndmaster_loksey);
 }

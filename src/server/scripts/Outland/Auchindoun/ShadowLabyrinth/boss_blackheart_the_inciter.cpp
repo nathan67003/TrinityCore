@@ -1,6 +1,5 @@
 /*
- * Copyright (C) 2008-2013 TrinityCore <http://www.trinitycore.org/>
- * Copyright (C) 2006-2009 ScriptDev2 <https://scriptdev2.svn.sourceforge.net/>
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -16,15 +15,15 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-/* ScriptData
-SDName: Boss_Blackheart_the_Inciter
-SD%Complete: 75
-SDComment: Incite Chaos not functional since core lacks Mind Control support
-SDCategory: Auchindoun, Shadow Labyrinth
-EndScriptData */
-
+#include "InstanceScript.h"
+#include "Map.h"
+#include "ObjectAccessor.h"
+#include "PassiveAI.h"
+#include "Player.h"
+#include "PlayerAI.h"
 #include "ScriptMgr.h"
 #include "ScriptedCreature.h"
+#include "SpellScript.h"
 #include "shadow_labyrinth.h"
 
 enum BlackheartTheInciter
@@ -48,121 +47,183 @@ enum BlackheartTheInciter
     SAY2_DEATH              = 9
 };
 
-class boss_blackheart_the_inciter : public CreatureScript
+enum Events
 {
-public:
-    boss_blackheart_the_inciter() : CreatureScript("boss_blackheart_the_inciter") { }
+    EVENT_INCITE_CHAOS          = 1,
+    EVENT_CHARGE_ATTACK         = 2,
+    EVENT_WAR_STOMP             = 3
+};
 
-    CreatureAI* GetAI(Creature* creature) const
+class BlackheartCharmedPlayerAI : public SimpleCharmedPlayerAI
+{
+    using SimpleCharmedPlayerAI::SimpleCharmedPlayerAI;
+    void OnCharmed(bool isNew) override
     {
-        return new boss_blackheart_the_inciterAI (creature);
+        if (me->GetMap()->IsDungeon())
+            if (Creature* blackheart = ObjectAccessor::GetCreature(*me, me->GetInstanceScript()->GetGuidData(DATA_BLACKHEART_THE_INCITER)))
+            {
+                blackheart->AI()->SetData(0, me->IsCharmed());
+                blackheart->GetThreatManager().AddThreat(me, 0.0f);
+            }
+        SimpleCharmedPlayerAI::OnCharmed(isNew);
+    }
+};
+
+struct boss_blackheart_the_inciter : public BossAI
+{
+    boss_blackheart_the_inciter(Creature* creature) : BossAI(creature, DATA_BLACKHEART_THE_INCITER) { }
+
+    void Reset() override
+    {
+        me->SetReactState(REACT_AGGRESSIVE);
+        _Reset();
     }
 
-    struct boss_blackheart_the_inciterAI : public ScriptedAI
+    void JustEngagedWith(Unit* who) override
     {
-        boss_blackheart_the_inciterAI(Creature* creature) : ScriptedAI(creature)
-        {
-            instance = creature->GetInstanceScript();
-        }
+        BossAI::JustEngagedWith(who);
+        events.ScheduleEvent(EVENT_INCITE_CHAOS, 20000);
+        events.ScheduleEvent(EVENT_CHARGE_ATTACK, 5000);
+        events.ScheduleEvent(EVENT_WAR_STOMP, 15000);
 
-        InstanceScript* instance;
+        Talk(SAY_AGGRO);
+    }
 
-        bool InciteChaos;
-        uint32 InciteChaos_Timer;
-        uint32 InciteChaosWait_Timer;
-        uint32 Charge_Timer;
-        uint32 Knockback_Timer;
-
-        void Reset()
-        {
-            InciteChaos = false;
-            InciteChaos_Timer = 20000;
-            InciteChaosWait_Timer = 15000;
-            Charge_Timer = 5000;
-            Knockback_Timer = 15000;
-
-            if (instance)
-                instance->SetData(DATA_BLACKHEARTTHEINCITEREVENT, NOT_STARTED);
-        }
-
-        void KilledUnit(Unit* /*victim*/)
-        {
+    void KilledUnit(Unit* who) override
+    {
+        if (who->GetTypeId() == TYPEID_PLAYER)
             Talk(SAY_SLAY);
-        }
+    }
 
-        void JustDied(Unit* /*killer*/)
+    void JustDied(Unit* /*killer*/) override
+    {
+        _JustDied();
+        Talk(SAY_DEATH);
+    }
+
+    uint8 charmCount = 0;
+    void SetData(uint32 /*index*/, uint32 data) override
+    {
+        if (data)
+            ++charmCount;
+        else
         {
-            Talk(SAY_DEATH);
-
-            if (instance)
-                instance->SetData(DATA_BLACKHEARTTHEINCITEREVENT, DONE);
+            if (!charmCount)
+                EnterEvadeMode(EVADE_REASON_OTHER); // sanity check
+            --charmCount;
         }
+        if (charmCount)
+            me->SetReactState(REACT_PASSIVE);
+        else
+            me->SetReactState(REACT_AGGRESSIVE);
+    }
 
-        void EnterCombat(Unit* /*who*/)
+    void UpdateAI(uint32 diff) override
+    {
+        events.Update(diff);
+        if (me->HasReactState(REACT_PASSIVE) || !UpdateVictim())
+            return;
+
+        if (me->HasUnitState(UNIT_STATE_CASTING))
+            return;
+
+        while (uint32 eventId = events.ExecuteEvent())
         {
-            Talk(SAY_AGGRO);
-
-            if (instance)
-                instance->SetData(DATA_BLACKHEARTTHEINCITEREVENT, IN_PROGRESS);
-        }
-
-        void UpdateAI(const uint32 diff)
-        {
-            //Return since we have no target
-            if (!UpdateVictim())
-                return;
-
-            if (InciteChaos)
+            switch (eventId)
             {
-                if (InciteChaosWait_Timer <= diff)
+                case EVENT_INCITE_CHAOS:
                 {
-                    InciteChaos = false;
-                    InciteChaosWait_Timer = 15000;
-                } else InciteChaosWait_Timer -= diff;
-
-                return;
+                    if (me->GetThreatManager().GetThreatListSize() > 1)
+                    {
+                        ResetThreatList();
+                        DoCast(me, SPELL_INCITE_CHAOS);
+                    }
+                    events.ScheduleEvent(EVENT_INCITE_CHAOS, 40000);
+                    break;
+                }
+                case EVENT_CHARGE_ATTACK:
+                    if (Unit* target = SelectTarget(SELECT_TARGET_RANDOM, 0))
+                        DoCast(target, SPELL_CHARGE);
+                    events.ScheduleEvent(EVENT_CHARGE, urand(15000, 25000));
+                    break;
+                case EVENT_WAR_STOMP:
+                    DoCast(me, SPELL_WAR_STOMP);
+                    events.ScheduleEvent(EVENT_WAR_STOMP, urand(18000, 24000));
+                    break;
             }
 
-            if (InciteChaos_Timer <= diff)
-            {
-                DoCast(me, SPELL_INCITE_CHAOS);
-
-                std::list<HostileReference*> t_list = me->getThreatManager().getThreatList();
-                for (std::list<HostileReference*>::const_iterator itr = t_list.begin(); itr!= t_list.end(); ++itr)
-                {
-                    Unit* target = Unit::GetUnit(*me, (*itr)->getUnitGuid());
-                    if (target && target->GetTypeId() == TYPEID_PLAYER)
-                        me->CastSpell(target, SPELL_INCITE_CHAOS_B, true);
-                }
-
-                DoResetThreat();
-                InciteChaos = true;
-                InciteChaos_Timer = 40000;
+            if (me->HasReactState(REACT_PASSIVE) || me->HasUnitState(UNIT_STATE_CASTING))
                 return;
-            } else InciteChaos_Timer -= diff;
-
-            //Charge_Timer
-            if (Charge_Timer <= diff)
-            {
-                if (Unit* target = SelectTarget(SELECT_TARGET_RANDOM, 0))
-                    DoCast(target, SPELL_CHARGE);
-                Charge_Timer = urand(15000, 25000);
-            } else Charge_Timer -= diff;
-
-            //Knockback_Timer
-            if (Knockback_Timer <= diff)
-            {
-                DoCast(me, SPELL_WAR_STOMP);
-                Knockback_Timer = urand(18000, 24000);
-            } else Knockback_Timer -= diff;
-
-            DoMeleeAttackIfReady();
         }
-    };
 
+        DoMeleeAttackIfReady();
+    }
 };
+
+struct boss_blackheart_the_inciter_mc_dummy : public NullCreatureAI
+{
+    using NullCreatureAI::NullCreatureAI;
+    void InitializeAI() override { me->SetReactState(REACT_PASSIVE); }
+    static const uint32 FIRST_DUMMY = NPC_BLACKHEART_DUMMY1, LAST_DUMMY = NPC_BLACKHEART_DUMMY5;
+    void IsSummonedBy(Unit* who) override
+    {
+        me->CastSpell(who, SPELL_INCITE_CHAOS_B, true);
+
+        // ensure everyone is in combat with everyone
+        if (auto* dummies = GetBlackheartDummies(me->GetInstanceScript()))
+            for (ObjectGuid const& guid : *dummies)
+                if (Creature* trigger = ObjectAccessor::GetCreature(*me, guid))
+                    if (me->GetEntry() != trigger->GetEntry())
+                    {
+                        me->GetThreatManager().AddThreat(trigger, 0.0f);
+                        trigger->GetThreatManager().AddThreat(who, 0.0f);
+                        for (Unit* other : trigger->m_Controlled)
+                        {
+                            me->GetThreatManager().AddThreat(other, 0.0f);
+                            other->GetThreatManager().AddThreat(who, 0.0f);
+                        }
+                    }
+    }
+    void UpdateAI(uint32 /*diff*/) override
+    {
+        if (me->m_Controlled.empty())
+            me->DespawnOrUnsummon();
+    }
+    PlayerAI* GetAIForCharmedPlayer(Player* player) override
+    {
+        return new BlackheartCharmedPlayerAI(player);
+    }
+};
+
+class spell_blackheart_incite_chaos : public SpellScript
+{
+    bool Validate(SpellInfo const* /*spell*/) override
+    {
+        return ValidateSpellInfo({ SPELL_INCITE_CHAOS_B });
+    }
+
+    static const uint8 NUM_INCITE_SPELLS = 5;
+    static const uint32 INCITE_SPELLS[NUM_INCITE_SPELLS];
+    uint8 i=0;
+    void HandleDummy(SpellEffIndex /*effIndex*/)
+    {
+        if (Unit* target = GetHitUnit())
+        {
+            target->CastSpell((Unit*)nullptr, INCITE_SPELLS[i], true);
+            i = (i + 1) % NUM_INCITE_SPELLS;
+        }
+    }
+
+    void Register() override
+    {
+        OnEffectHitTarget.Register(&spell_blackheart_incite_chaos::HandleDummy, EFFECT_0, SPELL_EFFECT_SCRIPT_EFFECT);
+    }
+};
+const uint32 spell_blackheart_incite_chaos::INCITE_SPELLS[spell_blackheart_incite_chaos::NUM_INCITE_SPELLS] = { 33677,33680,33681,33682,33683 };
 
 void AddSC_boss_blackheart_the_inciter()
 {
-    new boss_blackheart_the_inciter();
+    RegisterCreatureAIWithFactory(boss_blackheart_the_inciter, GetShadowLabyrinthAI);
+    RegisterCreatureAIWithFactory(boss_blackheart_the_inciter_mc_dummy, GetShadowLabyrinthAI);
+    RegisterSpellScript(spell_blackheart_incite_chaos);
 }

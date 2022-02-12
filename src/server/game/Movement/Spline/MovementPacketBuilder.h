@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005-2011 MaNGOS <http://getmangos.com/>
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -19,6 +19,10 @@
 #ifndef TRINITYSERVER_PACKET_BUILDER_H
 #define TRINITYSERVER_PACKET_BUILDER_H
 
+#include "Define.h" // for uint32
+#include "G3D/Vector3.h"
+using G3D::Vector3;
+
 class ByteBuffer;
 class WorldPacket;
 
@@ -27,11 +31,10 @@ namespace Movement
     class MoveSpline;
     class PacketBuilder
     {
-        static void WriteCommonMonsterMovePart(const MoveSpline& mov, WorldPacket& data);
     public:
-
-        static void WriteMonsterMove(const MoveSpline& mov, WorldPacket& data);
-        static void WriteCreate(const MoveSpline& mov, ByteBuffer& data);
+        static void WriteCreateBits(MoveSpline const& moveSpline, ByteBuffer& data);
+        static void WriteCreateData(MoveSpline const& moveSpline, ByteBuffer& data);
+        static float GetFlightSplineSyncDist(MoveSpline const& moveSpline);
     };
 }
 #endif // TRINITYSERVER_PACKET_BUILDER_H

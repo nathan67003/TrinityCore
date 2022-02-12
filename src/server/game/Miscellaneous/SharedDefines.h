@@ -1,6 +1,5 @@
 /*
- * Copyright (C) 2008-2013 TrinityCore <http://www.trinitycore.org/>
- * Copyright (C) 2005-2009 MaNGOS <http://getmangos.com/>
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -20,9 +19,12 @@
 #define TRINITY_SHAREDDEFINES_H
 
 #include "Define.h"
-#include <cassert>
+#include "DetourNavMesh.h"
 
-enum SpellEffIndex
+float const GROUND_HEIGHT_TOLERANCE = 0.05f; // Extra tolerance to z position to check if it is in air or on ground.
+constexpr float Z_OFFSET_FIND_HEIGHT = 1.5f;
+
+enum SpellEffIndex : uint8
 {
     EFFECT_0 = 0,
     EFFECT_1 = 1,
@@ -40,7 +42,17 @@ enum LootModes
     LOOT_MODE_HARD_MODE_1              = 0x2,
     LOOT_MODE_HARD_MODE_2              = 0x4,
     LOOT_MODE_HARD_MODE_3              = 0x8,
-    LOOT_MODE_HARD_MODE_4              = 0x10
+    LOOT_MODE_HARD_MODE_4              = 0x10,
+    LOOT_MODE_JUNK_FISH                = 0x8000
+};
+
+enum Expansions
+{
+    EXPANSION_CLASSIC                  = 0,
+    EXPANSION_THE_BURNING_CRUSADE      = 1,
+    EXPANSION_WRATH_OF_THE_LICH_KING   = 2,
+    EXPANSION_CATACLYSM                = 3,
+    MAX_EXPANSIONS                     = 4
 };
 
 enum Gender
@@ -62,9 +74,9 @@ enum Races
     RACE_TAUREN             = 6,
     RACE_GNOME              = 7,
     RACE_TROLL              = 8,
-    //RACE_GOBLIN             = 9,
+    RACE_GOBLIN             = 9,
     RACE_BLOODELF           = 10,
-    RACE_DRAENEI            = 11
+    RACE_DRAENEI            = 11,
     //RACE_FEL_ORC            = 12,
     //RACE_NAGA               = 13,
     //RACE_BROKEN             = 14,
@@ -74,21 +86,23 @@ enum Races
     //RACE_FOREST_TROLL       = 18,
     //RACE_TAUNKA             = 19,
     //RACE_NORTHREND_SKELETON = 20,
-    //RACE_ICE_TROLL          = 21
+    //RACE_ICE_TROLL          = 21,
+    RACE_WORGEN             = 22,
+    //RACE_GILNEAN            = 23
 };
 
 // max+1 for player race
-#define MAX_RACES         12
+#define MAX_RACES         23
 
 #define RACEMASK_ALL_PLAYABLE \
     ((1<<(RACE_HUMAN-1))   |(1<<(RACE_ORC-1))          |(1<<(RACE_DWARF-1))   | \
      (1<<(RACE_NIGHTELF-1))|(1<<(RACE_UNDEAD_PLAYER-1))|(1<<(RACE_TAUREN-1))  | \
      (1<<(RACE_GNOME-1))   |(1<<(RACE_TROLL-1))        |(1<<(RACE_BLOODELF-1))| \
-     (1<<(RACE_DRAENEI-1)))
+     (1<<(RACE_DRAENEI-1)) |(1<<(RACE_GOBLIN-1))       |(1<<(RACE_WORGEN-1)))
 
 #define RACEMASK_ALLIANCE \
     ((1<<(RACE_HUMAN-1)) | (1<<(RACE_DWARF-1)) | (1<<(RACE_NIGHTELF-1)) | \
-     (1<<(RACE_GNOME-1)) | (1<<(RACE_DRAENEI-1)))
+     (1<<(RACE_GNOME-1)) | (1<<(RACE_DRAENEI-1)) | (1<<(RACE_WORGEN-1)))
 
 #define RACEMASK_HORDE RACEMASK_ALL_PLAYABLE & ~RACEMASK_ALLIANCE
 
@@ -145,10 +159,56 @@ enum ReputationRank
     REP_EXALTED     = 7
 };
 
+enum FactionTemplates
+{
+    FACTION_NONE                        = 0,
+    FACTION_CREATURE                    = 7,
+    FACTION_ESCORTEE_A_NEUTRAL_PASSIVE  = 10,
+    FACTION_MONSTER                     = 14,
+    FACTION_MONSTER_2                   = 16,
+    FACTION_TROLL_BLOODSCALP            = 28,
+    FACTION_PREY                        = 31,
+    FACTION_ESCORTEE_H_NEUTRAL_PASSIVE  = 33,
+    FACTION_FRIENDLY                    = 35,
+    FACTION_OGRE                        = 45,
+    FACTION_ORC_DRAGONMAW               = 62,
+    FACTION_HORDE_GENERIC               = 83,
+    FACTION_ALLIANCE_GENERIC            = 84,
+    FACTION_DEMON                       = 90,
+    FACTION_ELEMENTAL                   = 91,
+    FACTION_DRAGONFLIGHT_BLACK          = 103,
+    FACTION_ESCORTEE_N_NEUTRAL_PASSIVE  = 113,
+    FACTION_ENEMY                       = 168,
+    FACTION_ESCORTEE_A_NEUTRAL_ACTIVE   = 231,
+    FACTION_ESCORTEE_H_NEUTRAL_ACTIVE   = 232,
+    FACTION_ESCORTEE_N_NEUTRAL_ACTIVE   = 250,
+    FACTION_ESCORTEE_N_FRIEND_PASSIVE   = 290,
+    FACTION_TITAN                       = 415,
+    FACTION_ESCORTEE_N_FRIEND_ACTIVE    = 495,
+    FACTION_GOBLIN_DARK_IRON_BAR_PATRON = 736,
+    FACTION_DARK_IRON_DWARVES           = 754,
+    FACTION_ESCORTEE_A_PASSIVE          = 774,
+    FACTION_ESCORTEE_H_PASSIVE          = 775,
+    FACTION_UNDEAD_SCOURGE              = 974,
+    FACTION_GUILD                       = 1168,
+    FACTION_EARTHEN_RING                = 1726,
+    FACTION_ALLIANCE_GENERIC_WG         = 1732,
+    FACTION_HORDE_GENERIC_WG            = 1735,
+    FACTION_ARAKKOA                     = 1738,
+    FACTION_ASHTONGUE_DEATHSWORN        = 1820,
+    FACTION_FLAYER_HUNTER               = 1840,
+    FACTION_MONSTER_SPAR_BUDDY          = 1868,
+    FACTION_ESCORTEE_N_ACTIVE           = 1986,
+    FACTION_ESCORTEE_H_ACTIVE           = 2046,
+    FACTION_UNDEAD_SCOURGE_2            = 2068,
+    FACTION_UNDEAD_SCOURGE_3            = 2084,
+    FACTION_SCARLET_CRUSADE             = 2089
+};
+
 #define MIN_REPUTATION_RANK (REP_HATED)
 #define MAX_REPUTATION_RANK 8
 
-#define MAX_SPILLOVER_FACTIONS 4
+#define MAX_SPILLOVER_FACTIONS 5
 
 enum MoneyConstants
 {
@@ -174,13 +234,22 @@ enum Powers
     POWER_RAGE                          = 1,
     POWER_FOCUS                         = 2,
     POWER_ENERGY                        = 3,
-    POWER_HAPPINESS                     = 4,
+    POWER_UNUSED                        = 4,
     POWER_RUNE                          = 5,
     POWER_RUNIC_POWER                   = 6,
-    MAX_POWERS                          = 7,
-    POWER_ALL                           = 127,    // default for class?
+    POWER_SOUL_SHARDS                   = 7,
+    POWER_ECLIPSE                       = 8,
+    POWER_HOLY_POWER                    = 9,
+    POWER_ALTERNATE_POWER               = 10,           // Used in some quests
+    MAX_POWERS                          = 11,
+    POWER_ALL                           = 127,          // default for class?
     POWER_HEALTH                        = 0xFFFFFFFE    // (-2 as signed value)
 };
+
+#define MAX_POWERS_PER_CLASS                5
+#define UNIT_HEALTH_REGENERATION_INTERVAL   2 * IN_MILLISECONDS
+#define PLAYER_POWER_UPDATE_INTERVAL        2 * IN_MILLISECONDS
+#define UNIT_POWER_UPDATE_INTERVAL          1 * IN_MILLISECONDS
 
 enum SpellSchools
 {
@@ -190,12 +259,11 @@ enum SpellSchools
     SPELL_SCHOOL_NATURE                 = 3,
     SPELL_SCHOOL_FROST                  = 4,
     SPELL_SCHOOL_SHADOW                 = 5,
-    SPELL_SCHOOL_ARCANE                 = 6
+    SPELL_SCHOOL_ARCANE                 = 6,
+    MAX_SPELL_SCHOOL                    = 7
 };
 
-#define MAX_SPELL_SCHOOL                  7
-
-enum SpellSchoolMask
+enum SpellSchoolMask : uint32
 {
     SPELL_SCHOOL_MASK_NONE    = 0x00,                       // not exist
     SPELL_SCHOOL_MASK_NORMAL  = (1 << SPELL_SCHOOL_NORMAL), // PHYSICAL (Armor)
@@ -248,6 +316,25 @@ enum SpellCategory
     SPELL_CATEGORY_DRINK            = 59
 };
 
+enum SpellVisualKit
+{
+    SPELL_VISUAL_KIT_FOOD           = 406,
+    SPELL_VISUAL_KIT_DRINK          = 438
+};
+
+enum WorgenRacialSpells
+{
+    SPELL_RUNNING_WILD_LEARN        = 94098,
+    SPELL_TWO_FORMS_RACIAL          = 68996,
+    SPELL_ALTERED_FORM_RACIAL       = 97709
+};
+
+enum SpiritOfRedemptionSpells
+{
+    SPELL_SPIRIT_OF_REDEMPTION_IMMUNITY = 62371,
+    SPELL_UNTRANSFORM_HERO              = 25100
+};
+
 const uint32 ItemQualityColors[MAX_ITEM_QUALITY] =
 {
     0xff9d9d9d,        //GREY
@@ -296,7 +383,7 @@ enum SpellAttr0
     SPELL_ATTR0_CASTABLE_WHILE_SITTING           = 0x08000000, // 27 castable while sitting
     SPELL_ATTR0_CANT_USED_IN_COMBAT              = 0x10000000, // 28 Cannot be used in combat
     SPELL_ATTR0_UNAFFECTED_BY_INVULNERABILITY    = 0x20000000, // 29 unaffected by invulnerability (hmm possible not...)
-    SPELL_ATTR0_BREAKABLE_BY_DAMAGE              = 0x40000000, // 30
+    SPELL_ATTR0_HEARTBEAT_RESIST_CHECK           = 0x40000000, // 30 random chance the effect will end TODO: implement core support
     SPELL_ATTR0_CANT_CANCEL                      = 0x80000000  // 31 positive aura can't be canceled
 };
 
@@ -304,16 +391,16 @@ enum SpellAttr1
 {
     SPELL_ATTR1_DISMISS_PET                      = 0x00000001, //  0 for spells without this flag client doesn't allow to summon pet if caster has a pet
     SPELL_ATTR1_DRAIN_ALL_POWER                  = 0x00000002, //  1 use all power (Only paladin Lay of Hands and Bunyanize)
-    SPELL_ATTR1_CHANNELED_1                      = 0x00000004, //  2 clientside checked? cancelable?
+    SPELL_ATTR1_CHANNELED                        = 0x00000004, //  2 Is Channeled
     SPELL_ATTR1_CANT_BE_REDIRECTED               = 0x00000008, //  3
     SPELL_ATTR1_UNK4                             = 0x00000010, //  4 stealth and whirlwind
     SPELL_ATTR1_NOT_BREAK_STEALTH                = 0x00000020, //  5 Not break stealth
-    SPELL_ATTR1_CHANNELED_2                      = 0x00000040, //  6
+    SPELL_ATTR1_SELF_CHANNELED                   = 0x00000040, //  6 Is Self Channeled
     SPELL_ATTR1_CANT_BE_REFLECTED                = 0x00000080, //  7
     SPELL_ATTR1_CANT_TARGET_IN_COMBAT            = 0x00000100, //  8 can target only out of combat units
     SPELL_ATTR1_MELEE_COMBAT_START               = 0x00000200, //  9 player starts melee combat after this spell is cast
     SPELL_ATTR1_NO_THREAT                        = 0x00000400, // 10 no generates threat on cast 100% (old NO_INITIAL_AGGRO)
-    SPELL_ATTR1_UNK11                            = 0x00000800, // 11 aura
+    SPELL_ATTR1_DONT_REFRESH_DURATION_ON_RECAST  = 0x00000800, // 11 aura will not refresh its duration when recast
     SPELL_ATTR1_IS_PICKPOCKET                    = 0x00001000, // 12 Pickpocket
     SPELL_ATTR1_FARSIGHT                         = 0x00002000, // 13 Client removes farsight on aura loss
     SPELL_ATTR1_CHANNEL_TRACK_TARGET             = 0x00004000, // 14 Client automatically forces player to face target when channeling
@@ -322,18 +409,18 @@ enum SpellAttr1
     SPELL_ATTR1_UNAUTOCASTABLE_BY_PET            = 0x00020000, // 17
     SPELL_ATTR1_UNK18                            = 0x00040000, // 18 stun, polymorph, daze, hex
     SPELL_ATTR1_CANT_TARGET_SELF                 = 0x00080000, // 19
-    SPELL_ATTR1_REQ_COMBO_POINTS1                = 0x00100000, // 20 Req combo points on target
+    SPELL_ATTR1_FINISHING_MOVE_DAMAGE            = 0x00100000, // 20 Finishing Move - Damage
     SPELL_ATTR1_UNK21                            = 0x00200000, // 21
-    SPELL_ATTR1_REQ_COMBO_POINTS2                = 0x00400000, // 22 Req combo points on target
+    SPELL_ATTR1_FINISHING_MOVE_DURATION          = 0x00400000, // 22 Finishing Move - Duration
     SPELL_ATTR1_UNK23                            = 0x00800000, // 23
     SPELL_ATTR1_IS_FISHING                       = 0x01000000, // 24 only fishing spells
     SPELL_ATTR1_UNK25                            = 0x02000000, // 25
     SPELL_ATTR1_UNK26                            = 0x04000000, // 26 works correctly with [target=focus] and [target=mouseover] macros?
-    SPELL_ATTR1_UNK27                            = 0x08000000, // 27 melee spell?
+    SPELL_ATTR1_DISCOUNT_POWER_ON_MISS           = 0x08000000, // 27 Discount Power On Miss
     SPELL_ATTR1_DONT_DISPLAY_IN_AURA_BAR         = 0x10000000, // 28 client doesn't display these spells in aura bar
     SPELL_ATTR1_CHANNEL_DISPLAY_SPELL_NAME       = 0x20000000, // 29 spell name is displayed in cast bar instead of 'channeling' text
     SPELL_ATTR1_ENABLE_AT_DODGE                  = 0x40000000, // 30 Overpower
-    SPELL_ATTR1_UNK31                            = 0x80000000  // 31
+    SPELL_ATTR1_CAST_WHEN_LEARNED                = 0x80000000  // 31 Cast When Learned
 };
 
 enum SpellAttr2
@@ -345,7 +432,7 @@ enum SpellAttr2
     SPELL_ATTR2_DISPLAY_IN_STANCE_BAR            = 0x00000010, //  4 client displays icon in stance bar when learned, even if not shapeshift
     SPELL_ATTR2_AUTOREPEAT_FLAG                  = 0x00000020, //  5
     SPELL_ATTR2_CANT_TARGET_TAPPED               = 0x00000040, //  6 target must be tapped by caster
-    SPELL_ATTR2_UNK7                             = 0x00000080, //  7
+    SPELL_ATTR2_DONT_REPORT_SPELL_FAILURE        = 0x00000080, //  7 Does not send spell failure packets when the cast has failed
     SPELL_ATTR2_UNK8                             = 0x00000100, //  8 not set in 3.0.3
     SPELL_ATTR2_UNK9                             = 0x00000200, //  9
     SPELL_ATTR2_UNK10                            = 0x00000400, // 10 related to tame
@@ -358,40 +445,40 @@ enum SpellAttr2
     SPELL_ATTR2_NOT_RESET_AUTO_ACTIONS           = 0x00020000, // 17 don't reset timers for melee autoattacks (swings) or ranged autoattacks (autoshoots)
     SPELL_ATTR2_REQ_DEAD_PET                     = 0x00040000, // 18 Only Revive pet and Heart of the Pheonix
     SPELL_ATTR2_NOT_NEED_SHAPESHIFT              = 0x00080000, // 19 does not necessarly need shapeshift
-    SPELL_ATTR2_UNK20                            = 0x00100000, // 20
+    SPELL_ATTR2_INITIATE_COMBAT_POST_CAST        = 0x00100000, // 20 Initiate Combat Post-Cast (Enables Auto-Attack)
     SPELL_ATTR2_DAMAGE_REDUCED_SHIELD            = 0x00200000, // 21 for ice blocks, pala immunity buffs, priest absorb shields, but used also for other spells -> not sure!
-    SPELL_ATTR2_UNK22                            = 0x00400000, // 22 Ambush, Backstab, Cheap Shot, Death Grip, Garrote, Judgements, Mutilate, Pounce, Ravage, Shiv, Shred
+    SPELL_ATTR2_NO_INITIAL_THREAT                = 0x00400000, // 22 No Initial Threat
     SPELL_ATTR2_IS_ARCANE_CONCENTRATION          = 0x00800000, // 23 Only mage Arcane Concentration have this flag
     SPELL_ATTR2_UNK24                            = 0x01000000, // 24
     SPELL_ATTR2_UNK25                            = 0x02000000, // 25
-    SPELL_ATTR2_UNK26                            = 0x04000000, // 26 unaffected by school immunity
+    SPELL_ATTR2_UNAFFECTED_BY_AURA_SCHOOL_IMMUNE = 0x04000000, // 26 unaffected by school immunity
     SPELL_ATTR2_UNK27                            = 0x08000000, // 27
-    SPELL_ATTR2_UNK28                            = 0x10000000, // 28
+    SPELL_ATTR2_IGNORE_ACTION_AURA_INTERRUPT_FLAGS = 0x10000000, // 28 doesnt break auras with SpellAuraInterruptFlags::Action and SpellAuraInterruptFlags::ActionDelayed
     SPELL_ATTR2_CANT_CRIT                        = 0x20000000, // 29 Spell can't crit
-    SPELL_ATTR2_TRIGGERED_CAN_TRIGGER_PROC       = 0x40000000, // 30 spell can trigger even if triggered
+    SPELL_ATTR2_ACTIVE_THREAT                    = 0x40000000, // 30 Active Threat
     SPELL_ATTR2_FOOD_BUFF                        = 0x80000000  // 31 Food or Drink Buff (like Well Fed)
 };
 
 enum SpellAttr3
 {
     SPELL_ATTR3_UNK0                             = 0x00000001, //  0
-    SPELL_ATTR3_UNK1                             = 0x00000002, //  1
+    SPELL_ATTR3_IGNORE_PROC_SUBCLASS_MASK        = 0x00000002, //  1 Ignores subclass mask check when checking proc
     SPELL_ATTR3_UNK2                             = 0x00000004, //  2
-    SPELL_ATTR3_BLOCKABLE_SPELL                  = 0x00000008, //  3 Only dmg class melee in 3.1.3
+    SPELL_ATTR3_COMPLETELY_BLOCKED               = 0x00000008, //  3 Completely Blocked
     SPELL_ATTR3_IGNORE_RESURRECTION_TIMER        = 0x00000010, //  4 you don't have to wait to be resurrected with these spells
     SPELL_ATTR3_UNK5                             = 0x00000020, //  5
     SPELL_ATTR3_UNK6                             = 0x00000040, //  6
     SPELL_ATTR3_STACK_FOR_DIFF_CASTERS           = 0x00000080, //  7 separate stack for every caster
     SPELL_ATTR3_ONLY_TARGET_PLAYERS              = 0x00000100, //  8 can only target players
-    SPELL_ATTR3_TRIGGERED_CAN_TRIGGER_PROC_2     = 0x00000200, //  9 triggered from effect?
+    SPELL_ATTR3_NOT_A_PROC                       = 0x00000200, //  9 Not a Proc
     SPELL_ATTR3_MAIN_HAND                        = 0x00000400, // 10 Main hand weapon required
-    SPELL_ATTR3_BATTLEGROUND                     = 0x00000800, // 11 Can casted only on battleground
+    SPELL_ATTR3_BATTLEGROUND                     = 0x00000800, // 11 Can only be cast in battleground
     SPELL_ATTR3_ONLY_TARGET_GHOSTS               = 0x00001000, // 12
-    SPELL_ATTR3_UNK13                            = 0x00002000, // 13
+    SPELL_ATTR3_DONT_DISPLAY_CHANNEL_BAR         = 0x00002000, // 13 Clientside attribute - will not display channeling bar
     SPELL_ATTR3_IS_HONORLESS_TARGET              = 0x00004000, // 14 "Honorless Target" only this spells have this flag
     SPELL_ATTR3_UNK15                            = 0x00008000, // 15 Auto Shoot, Shoot, Throw,  - this is autoshot flag
-    SPELL_ATTR3_CANT_TRIGGER_PROC                = 0x00010000, // 16 confirmed with many patchnotes
-    SPELL_ATTR3_NO_INITIAL_AGGRO                 = 0x00020000, // 17 Soothe Animal, 39758, Mind Soothe
+    SPELL_ATTR3_CANT_TRIGGER_CASTER_PROCS        = 0x00010000, // 16 Suppress Caster Procs
+    SPELL_ATTR3_CANT_TRIGGER_TARGET_PROCS        = 0x00020000, // 17 Suppress Target Procs
     SPELL_ATTR3_IGNORE_HIT_RESULT                = 0x00040000, // 18 Spell should always hit its target
     SPELL_ATTR3_DISABLE_PROC                     = 0x00080000, // 19 during aura proc no spells can trigger (20178, 20375)
     SPELL_ATTR3_DEATH_PERSISTENT                 = 0x00100000, // 20 Death persistent spells
@@ -399,8 +486,8 @@ enum SpellAttr3
     SPELL_ATTR3_REQ_WAND                         = 0x00400000, // 22 Req wand
     SPELL_ATTR3_UNK23                            = 0x00800000, // 23
     SPELL_ATTR3_REQ_OFFHAND                      = 0x01000000, // 24 Req offhand weapon
-    SPELL_ATTR3_UNK25                            = 0x02000000, // 25 no cause spell pushback ?
-    SPELL_ATTR3_CAN_PROC_WITH_TRIGGERED          = 0x04000000, // 26 auras with this attribute can proc from triggered spell casts with SPELL_ATTR3_TRIGGERED_CAN_TRIGGER_PROC_2 (67736 + 52999)
+    SPELL_ATTR3_TREAT_AS_PERIODIC                = 0x02000000, // 25 Makes the spell appear as periodic in client combat logs - used by spells that trigger another spell on each tick
+    SPELL_ATTR3_CAN_PROC_FROM_PROCS              = 0x04000000, // 26 Can Proc From Procs
     SPELL_ATTR3_DRAIN_SOUL                       = 0x08000000, // 27 only drain soul has this flag
     SPELL_ATTR3_UNK28                            = 0x10000000, // 28
     SPELL_ATTR3_NO_DONE_BONUS                    = 0x20000000, // 29 Ignore caster spellpower and done damage mods?  client doesn't apply spellmods for those spells
@@ -412,28 +499,28 @@ enum SpellAttr4
 {
     SPELL_ATTR4_IGNORE_RESISTANCES               = 0x00000001, //  0 spells with this attribute will completely ignore the target's resistance (these spells can't be resisted)
     SPELL_ATTR4_PROC_ONLY_ON_CASTER              = 0x00000002, //  1 proc only on effects with TARGET_UNIT_CASTER?
-    SPELL_ATTR4_UNK2                             = 0x00000004, //  2
+    SPELL_ATTR4_FADES_WHILE_LOGGED_OUT           = 0x00000004, //  2 duration is removed from aura while player is logged out
     SPELL_ATTR4_UNK3                             = 0x00000008, //  3
     SPELL_ATTR4_UNK4                             = 0x00000010, //  4 This will no longer cause guards to attack on use??
     SPELL_ATTR4_UNK5                             = 0x00000020, //  5
     SPELL_ATTR4_NOT_STEALABLE                    = 0x00000040, //  6 although such auras might be dispellable, they cannot be stolen
-    SPELL_ATTR4_TRIGGERED                        = 0x00000080, //  7 spells forced to be triggered
-    SPELL_ATTR4_FIXED_DAMAGE                     = 0x00000100, //  8 ignores taken percent damage mods?
+    SPELL_ATTR4_CAN_CAST_WHILE_CASTING           = 0x00000080, //  7 Can be cast while another cast is in progress - see CanCastWhileCasting(SpellRec const*,CGUnit_C *,int &)
+    SPELL_ATTR4_FIXED_DAMAGE                     = 0x00000100, //  8 Ignores resilience and any (except mechanic related) damage or % damage taken auras on target.
     SPELL_ATTR4_TRIGGER_ACTIVATE                 = 0x00000200, //  9 initially disabled / trigger activate from event (Execute, Riposte, Deep Freeze end other)
     SPELL_ATTR4_SPELL_VS_EXTEND_COST             = 0x00000400, // 10 Rogue Shiv have this flag
     SPELL_ATTR4_UNK11                            = 0x00000800, // 11
     SPELL_ATTR4_UNK12                            = 0x00001000, // 12
     SPELL_ATTR4_UNK13                            = 0x00002000, // 13
     SPELL_ATTR4_DAMAGE_DOESNT_BREAK_AURAS        = 0x00004000, // 14 doesn't break auras by damage from these spells
-    SPELL_ATTR4_UNK15                            = 0x00008000, // 15
-    SPELL_ATTR4_NOT_USABLE_IN_ARENA              = 0x00010000, // 16
+    SPELL_ATTR4_HIDDEN_IN_SPELLBOOK              = 0x00008000, // 15
+    SPELL_ATTR4_NOT_USABLE_IN_ARENA_OR_RATED_BG  = 0x00010000, // 16 Cannot be used in both Arenas or Rated Battlegrounds
     SPELL_ATTR4_USABLE_IN_ARENA                  = 0x00020000, // 17
     SPELL_ATTR4_AREA_TARGET_CHAIN                = 0x00040000, // 18 (NYI)hits area targets one after another instead of all at once
     SPELL_ATTR4_UNK19                            = 0x00080000, // 19 proc dalayed, after damage or don't proc on absorb?
     SPELL_ATTR4_NOT_CHECK_SELFCAST_POWER         = 0x00100000, // 20 supersedes message "More powerful spell applied" for self casts.
-    SPELL_ATTR4_UNK21                            = 0x00200000, // 21 Pally aura, dk presence, dudu form, warrior stance, shadowform, hunter track
-    SPELL_ATTR4_UNK22                            = 0x00400000, // 22 Seal of Command (42058,57770) and Gymer's Smash 55426
-    SPELL_ATTR4_UNK23                            = 0x00800000, // 23
+    SPELL_ATTR4_DONT_REMOVE_IN_ARENA             = 0x00200000, // 21 Pally aura, dk presence, dudu form, warrior stance, shadowform, hunter track
+    SPELL_ATTR4_UNK22                            = 0x00400000, // 22 Seal of Command (42058, 57770) and Gymer's Smash 55426
+    SPELL_ATTR4_CANT_TRIGGER_ITEM_SPELLS         = 0x00800000, // 23 spells with this flag should not trigger item spells / enchants (mostly in conjunction with SPELL_ATTR0_STOP_ATTACK_TARGET)
     SPELL_ATTR4_UNK24                            = 0x01000000, // 24 some shoot spell
     SPELL_ATTR4_IS_PET_SCALING                   = 0x02000000, // 25 pet scaling auras
     SPELL_ATTR4_CAST_ONLY_IN_OUTLAND             = 0x04000000, // 26 Can only be used in Outland.
@@ -441,28 +528,28 @@ enum SpellAttr4
     SPELL_ATTR4_UNK28                            = 0x10000000, // 28 Aimed Shot
     SPELL_ATTR4_UNK29                            = 0x20000000, // 29
     SPELL_ATTR4_UNK30                            = 0x40000000, // 30
-    SPELL_ATTR4_UNK31                            = 0x80000000  // 31 Polymorph (chicken) 228 and Sonic Boom (38052,38488)
+    SPELL_ATTR4_UNK31                            = 0x80000000  // 31 Polymorph (chicken) 228 and Sonic Boom (38052, 38488)
 };
 
 enum SpellAttr5
 {
-    SPELL_ATTR5_UNK0                             = 0x00000001, //  0
+    SPELL_ATTR5_ALLOW_ACTIONS_DURING_CHANNEL     = 0x00000001, //  0 Allow Actions During Channel
     SPELL_ATTR5_NO_REAGENT_WHILE_PREP            = 0x00000002, //  1 not need reagents if UNIT_FLAG_PREPARATION
-    SPELL_ATTR5_UNK2                             = 0x00000004, //  2
+    SPELL_ATTR5_REMOVE_ON_ARENA_ENTER            = 0x00000004, //  2 remove this aura on arena enter
     SPELL_ATTR5_USABLE_WHILE_STUNNED             = 0x00000008, //  3 usable while stunned
     SPELL_ATTR5_UNK4                             = 0x00000010, //  4
     SPELL_ATTR5_SINGLE_TARGET_SPELL              = 0x00000020, //  5 Only one target can be apply at a time
     SPELL_ATTR5_UNK6                             = 0x00000040, //  6
-    SPELL_ATTR5_UNK7                             = 0x00000080, //  7
-    SPELL_ATTR5_UNK8                             = 0x00000100, //  8
+    SPELL_ATTR5_DONT_TARGET_PLAYERS              = 0x00000080, //  7 Not On Player
+    SPELL_ATTR5_DONT_ALLOW_PET_TARGET            = 0x00000100, //  8 do not allow the following spell to affect or target pets
     SPELL_ATTR5_START_PERIODIC_AT_APPLY          = 0x00000200, //  9 begin periodic tick at aura apply
     SPELL_ATTR5_HIDE_DURATION                    = 0x00000400, // 10 do not send duration to client
     SPELL_ATTR5_ALLOW_TARGET_OF_TARGET_AS_TARGET = 0x00000800, // 11 (NYI) uses target's target as target if original target not valid (intervene for example)
     SPELL_ATTR5_UNK12                            = 0x00001000, // 12 Cleave related?
-    SPELL_ATTR5_HASTE_AFFECT_DURATION            = 0x00002000, // 13 haste effects decrease duration of this
-    SPELL_ATTR5_UNK14                            = 0x00004000, // 14
-    SPELL_ATTR5_UNK15                            = 0x00008000, // 15 Inflits on multiple targets?
-    SPELL_ATTR5_SPECIAL_ITEM_CLASS_CHECK         = 0x00010000, // 16 this allows spells with EquippedItemClass to affect spells from other items if the required item is equipped
+    SPELL_ATTR5_SPELL_HASTE_AFFECTS_PERIODIC     = 0x00002000, // 13 Spell Haste Affects Periodic
+    SPELL_ATTR5_NOT_USABLE_WHILE_CHARMED         = 0x00004000, // 14 Charmed units cannot cast this spell
+    SPELL_ATTR5_TREAT_AS_AREA_EFFECT             = 0x00008000, // 15 Treat As Area Effect
+    SPELL_ATTR5_UNK16                            = 0x00010000, // 16
     SPELL_ATTR5_USABLE_WHILE_FEARED              = 0x00020000, // 17 usable while feared
     SPELL_ATTR5_USABLE_WHILE_CONFUSED            = 0x00040000, // 18 usable while confused
     SPELL_ATTR5_DONT_TURN_DURING_CAST            = 0x00080000, // 19 Blocks caster's turning when casting (client does not automatically turn caster's model to face UNIT_FIELD_TARGET)
@@ -472,9 +559,9 @@ enum SpellAttr5
     SPELL_ATTR5_UNK23                            = 0x00800000, // 23
     SPELL_ATTR5_UNK24                            = 0x01000000, // 24
     SPELL_ATTR5_UNK25                            = 0x02000000, // 25
-    SPELL_ATTR5_UNK26                            = 0x04000000, // 26 aoe related - Boulder, Cannon, Corpse Explosion, Fire Nova, Flames, Frost Bomb, Living Bomb, Seed of Corruption, Starfall, Thunder Clap, Volley
-    SPELL_ATTR5_UNK27                            = 0x08000000, // 27
-    SPELL_ATTR5_UNK28                            = 0x10000000, // 28
+    SPELL_ATTR5_SKIP_CHECKCAST_LOS_CHECK         = 0x04000000, // 26 aoe related - Boulder, Cannon, Corpse Explosion, Fire Nova, Flames, Frost Bomb, Living Bomb, Seed of Corruption, Starfall, Thunder Clap, Volley
+    SPELL_ATTR5_DONT_SHOW_AURA_IF_SELF_CAST      = 0x08000000, // 27 Auras with this attribute are not visible on units that are the caster
+    SPELL_ATTR5_DONT_SHOW_AURA_IF_NOT_SELF_CAST  = 0x10000000, // 28 Auras with this attribute are not visible on units that are not the caster
     SPELL_ATTR5_UNK29                            = 0x20000000, // 29
     SPELL_ATTR5_UNK30                            = 0x40000000, // 30
     SPELL_ATTR5_UNK31                            = 0x80000000  // 31 Forces all nearby enemies to focus attacks caster
@@ -485,10 +572,10 @@ enum SpellAttr6
     SPELL_ATTR6_DONT_DISPLAY_COOLDOWN            = 0x00000001, //  0 client doesn't display cooldown in tooltip for these spells
     SPELL_ATTR6_ONLY_IN_ARENA                    = 0x00000002, //  1 only usable in arena
     SPELL_ATTR6_IGNORE_CASTER_AURAS              = 0x00000004, //  2
-    SPELL_ATTR6_UNK3                             = 0x00000008, //  3
+    SPELL_ATTR6_ASSIST_IGNORE_IMMUNE_FLAG        = 0x00000008, //  3 skips checking UNIT_FLAG_IMMUNE_TO_PC and UNIT_FLAG_IMMUNE_TO_NPC flags on assist
     SPELL_ATTR6_UNK4                             = 0x00000010, //  4
-    SPELL_ATTR6_UNK5                             = 0x00000020, //  5
-    SPELL_ATTR6_UNK6                             = 0x00000040, //  6
+    SPELL_ATTR6_DONT_CONSUME_PROC_CHARGES        = 0x00000020, //  5 dont consume proc charges
+    SPELL_ATTR6_USE_SPELL_CAST_EVENT             = 0x00000040, //  6 Auras with this attribute trigger SPELL_CAST combat log event instead of SPELL_AURA_START (clientside attribute)
     SPELL_ATTR6_UNK7                             = 0x00000080, //  7
     SPELL_ATTR6_CANT_TARGET_CROWD_CONTROLLED     = 0x00000100, //  8
     SPELL_ATTR6_UNK9                             = 0x00000200, //  9
@@ -502,61 +589,170 @@ enum SpellAttr6
     SPELL_ATTR6_UNK17                            = 0x00020000, // 17 Mount spell
     SPELL_ATTR6_CAST_BY_CHARMER                  = 0x00040000, // 18 client won't allow to cast these spells when unit is not possessed && charmer of caster will be original caster
     SPELL_ATTR6_UNK19                            = 0x00080000, // 19 only 47488, 50782
-    SPELL_ATTR6_UNK20                            = 0x00100000, // 20 only 58371, 62218
+    SPELL_ATTR6_ONLY_VISIBLE_TO_CASTER           = 0x00100000, // 20 Auras with this attribute are only visible to their caster (or pet's owner)
     SPELL_ATTR6_CLIENT_UI_TARGET_EFFECTS         = 0x00200000, // 21 it's only client-side attribute
     SPELL_ATTR6_UNK22                            = 0x00400000, // 22 only 72054
     SPELL_ATTR6_UNK23                            = 0x00800000, // 23
     SPELL_ATTR6_CAN_TARGET_UNTARGETABLE          = 0x01000000, // 24
-    SPELL_ATTR6_UNK25                            = 0x02000000, // 25 Exorcism, Flash of Light
+    SPELL_ATTR6_NOT_RESET_SWING_IF_INSTANT       = 0x02000000, // 25 Exorcism, Flash of Light
     SPELL_ATTR6_UNK26                            = 0x04000000, // 26 related to player castable positive buff
-    SPELL_ATTR6_UNK27                            = 0x08000000, // 27
+    SPELL_ATTR6_LIMIT_PCT_HEALING_MODS           = 0x08000000, // 27 some custom rules - complicated
     SPELL_ATTR6_UNK28                            = 0x10000000, // 28 Death Grip
-    SPELL_ATTR6_NO_DONE_PCT_DAMAGE_MODS          = 0x20000000, // 29 ignores done percent damage mods?
+    SPELL_ATTR6_LIMIT_PCT_DAMAGE_MODS            = 0x20000000, // 29 ignores done percent damage mods? some custom rules - complicated
     SPELL_ATTR6_UNK30                            = 0x40000000, // 30
-    SPELL_ATTR6_UNK31                            = 0x80000000  // 31 some special cooldown calc? only 2894
+    SPELL_ATTR6_IGNORE_CATEGORY_COOLDOWN_MODS    = 0x80000000  // 31 Spells with this attribute skip applying modifiers to category cooldowns
 };
 
 enum SpellAttr7
 {
     SPELL_ATTR7_UNK0                             = 0x00000001, //  0 Shaman's new spells (Call of the ...), Feign Death.
-    SPELL_ATTR7_UNK1                             = 0x00000002, //  1 Not set in 3.2.2a.
+    SPELL_ATTR7_IGNORE_DURATION_MODS             = 0x00000002, //  1 Duration is not affected by duration modifiers
     SPELL_ATTR7_REACTIVATE_AT_RESURRECT          = 0x00000004, //  2 Paladin's auras and 65607 only.
     SPELL_ATTR7_IS_CHEAT_SPELL                   = 0x00000008, //  3 Cannot cast if caster doesn't have UnitFlag2 & UNIT_FLAG2_ALLOW_CHEAT_SPELLS
     SPELL_ATTR7_UNK4                             = 0x00000010, //  4 Only 47883 (Soulstone Resurrection) and test spell.
-    SPELL_ATTR7_SUMMON_PLAYER_TOTEM              = 0x00000020, //  5 Only Shaman player totems.
-    SPELL_ATTR7_UNK6                             = 0x00000040, //  6 Dark Surge, Surge of Light, Burning Breath triggers (boss spells).
+    SPELL_ATTR7_SUMMON_TOTEM                     = 0x00000020, //  5 Only Shaman totems.
+    SPELL_ATTR7_NO_PUSHBACK_ON_DAMAGE            = 0x00000040, //  6 Does not cause spell pushback on damage
     SPELL_ATTR7_UNK7                             = 0x00000080, //  7 66218 (Launch) spell.
     SPELL_ATTR7_HORDE_ONLY                       = 0x00000100, //  8 Teleports, mounts and other spells.
     SPELL_ATTR7_ALLIANCE_ONLY                    = 0x00000200, //  9 Teleports, mounts and other spells.
     SPELL_ATTR7_DISPEL_CHARGES                   = 0x00000400, // 10 Dispel and Spellsteal individual charges instead of whole aura.
     SPELL_ATTR7_INTERRUPT_ONLY_NONPLAYER         = 0x00000800, // 11 Only non-player casts interrupt, though Feral Charge - Bear has it.
-    SPELL_ATTR7_UNK12                            = 0x00001000, // 12 Not set in 3.2.2a.
-    SPELL_ATTR7_UNK13                            = 0x00002000, // 13 Not set in 3.2.2a.
+    SPELL_ATTR7_SILENCE_ONLY_NONPLAYER           = 0x00001000, // 12 Not set in 3.2.2a.
+    SPELL_ATTR7_CAN_ALWAYS_BE_INTERRUPTED        = 0x00002000, // 13 Can always be interrupted, even if caster is immune
     SPELL_ATTR7_UNK14                            = 0x00004000, // 14 Only 52150 (Raise Dead - Pet) spell.
     SPELL_ATTR7_UNK15                            = 0x00008000, // 15 Exorcism. Usable on players? 100% crit chance on undead and demons?
-    SPELL_ATTR7_UNK16                            = 0x00010000, // 16 Druid spells (29166, 54833, 64372, 68285).
+    SPELL_ATTR7_HIDDEN_IN_SPELLBOOK_WHEN_LEARNED = 0x00010000, // 16 After learning these spells become hidden in spellbook (but are visible when not learned for low level characters)
     SPELL_ATTR7_UNK17                            = 0x00020000, // 17 Only 27965 (Suicide) spell.
     SPELL_ATTR7_HAS_CHARGE_EFFECT                = 0x00040000, // 18 Only spells that have Charge among effects.
     SPELL_ATTR7_ZONE_TELEPORT                    = 0x00080000, // 19 Teleports to specific zones.
     SPELL_ATTR7_UNK20                            = 0x00100000, // 20 Blink, Divine Shield, Ice Block
     SPELL_ATTR7_UNK21                            = 0x00200000, // 21 Not set
     SPELL_ATTR7_UNK22                            = 0x00400000, // 22
-    SPELL_ATTR7_UNK23                            = 0x00800000, // 23 Motivate, Mutilate, Shattering Throw
-    SPELL_ATTR7_UNK24                            = 0x01000000, // 24 Motivate, Mutilate, Perform Speech, Shattering Throw
-    SPELL_ATTR7_UNK25                            = 0x02000000, // 25
+    SPELL_ATTR7_CANT_DODGE                       = 0x00800000, // 23 No Attack Dodge
+    SPELL_ATTR7_CANT_PARRY                       = 0x01000000, // 24 No Attack Parry
+    SPELL_ATTR7_CANT_MISS                        = 0x02000000, // 25 No Attack Miss
     SPELL_ATTR7_UNK26                            = 0x04000000, // 26
     SPELL_ATTR7_UNK27                            = 0x08000000, // 27 Not set
-    SPELL_ATTR7_BENEFIT_FROM_SPELLMOD            = 0x10000000, // 28 Non-permanent, non-passive buffs that may benefit from spellmods
+    SPELL_ATTR7_CONSOLIDATED_RAID_BUFF           = 0x10000000, // 28 May be collapsed in raid buff frame (clientside attribute)
     SPELL_ATTR7_UNK29                            = 0x20000000, // 29 only 69028, 71237
     SPELL_ATTR7_UNK30                            = 0x40000000, // 30 Burning Determination, Divine Sacrifice, Earth Shield, Prayer of Mending
     SPELL_ATTR7_CLIENT_INDICATOR                 = 0x80000000
+};
+
+enum SpellAttr8
+{
+    SPELL_ATTR8_CANT_BLOCK                       = 0x00000001, //  0 No Attack Block
+    SPELL_ATTR8_UNK1                             = 0x00000002, //  1
+    SPELL_ATTR8_UNK2                             = 0x00000004, //  2
+    SPELL_ATTR8_UNK3                             = 0x00000008, //  3
+    SPELL_ATTR8_UNK4                             = 0x00000010, //  4
+    SPELL_ATTR8_UNK5                             = 0x00000020, //  5
+    SPELL_ATTR8_UNK6                             = 0x00000040, //  6
+    SPELL_ATTR8_UNK7                             = 0x00000080, //  7
+    SPELL_ATTR8_AFFECT_PARTY_AND_RAID            = 0x00000100, //  8 Nearly all spells have "all party and raid" in description
+    SPELL_ATTR8_PERIODIC_CAN_CRIT                = 0x00000200, //  9 Periodic Can Crit
+    SPELL_ATTR8_NAME_CHANGED_DURING_TRANSFORM    = 0x00000400, // 10 according to wowhead comments, name changes, title remains
+    SPELL_ATTR8_UNK11                            = 0x00000800, // 11
+    SPELL_ATTR8_AURA_SEND_AMOUNT                 = 0x00001000, // 12 Aura must have flag AFLAG_ANY_EFFECT_AMOUNT_SENT to send amount
+    SPELL_ATTR8_UNK13                            = 0x00002000, // 13
+    SPELL_ATTR8_UNK14                            = 0x00004000, // 14
+    SPELL_ATTR8_WATER_MOUNT                      = 0x00008000, // 15 only one River Boat used in Thousand Needles
+    SPELL_ATTR8_UNK16                            = 0x00010000, // 16
+    SPELL_ATTR8_HASTE_AFFECTS_DURATION           = 0x00020000, // 17 Haste Affects Duration
+    SPELL_ATTR8_REMEMBER_SPELLS                  = 0x00040000, // 18 at some point in time, these auras remember spells and allow to cast them later
+    SPELL_ATTR8_USE_COMBO_POINTS_ON_ANY_TARGET   = 0x00080000, // 19 allows to consume combo points from dead targets
+    SPELL_ATTR8_ARMOR_SPECIALIZATION             = 0x00100000, // 20
+    SPELL_ATTR8_UNK21                            = 0x00200000, // 21
+    SPELL_ATTR8_UNK22                            = 0x00400000, // 22
+    SPELL_ATTR8_BATTLE_RESURRECTION              = 0x00800000, // 23 Used to limit the Amount of Resurrections in Boss Encounters
+    SPELL_ATTR8_HEAL_PREDICTION                  = 0x01000000, // 24 Displays a predicted health amount on the targets frame
+    SPELL_ATTR8_UNK25                            = 0x02000000, // 25
+    SPELL_ATTR8_RAID_MARKER                      = 0x04000000, // 26 probably spell no need learn to cast
+    SPELL_ATTR8_AI_FACE_TARGET                   = 0x08000000, // 27 AI Face Target
+    SPELL_ATTR8_NOT_IN_BG_OR_ARENA               = 0x10000000, // 28 not allow to cast or deactivate currently active effect, not sure about Fast Track
+    SPELL_ATTR8_MASTERY_SPECIALIZATION           = 0x20000000, // 29
+    SPELL_ATTR8_UNK30                            = 0x40000000, // 30
+    SPELL_ATTR8_ATTACK_IGNORE_IMMUNE_TO_PC_FLAG  = 0x80000000  // 31 Do not check UNIT_FLAG_IMMUNE_TO_PC in IsValidAttackTarget
+};
+
+enum SpellAttr9
+{
+    SPELL_ATTR9_UNK0                             = 0x00000001, //  0
+    SPELL_ATTR9_UNK1                             = 0x00000002, //  1
+    SPELL_ATTR9_RESTRICTED_FLIGHT_AREA           = 0x00000004, //  2 Dalaran and Wintergrasp flight area auras have it
+    SPELL_ATTR9_UNK3                             = 0x00000008, //  3
+    SPELL_ATTR9_SPECIAL_DELAY_CALCULATION        = 0x00000010, //  4
+    SPELL_ATTR9_SUMMON_PLAYER_TOTEM              = 0x00000020, //  5
+    SPELL_ATTR9_UNK6                             = 0x00000040, //  6
+    SPELL_ATTR9_UNK7                             = 0x00000080, //  7
+    SPELL_ATTR9_AIMED_SHOT                       = 0x00000100, //  8
+    SPELL_ATTR9_NOT_USABLE_IN_ARENA              = 0x00000200, //  9 Cannot be used in arenas
+    SPELL_ATTR9_UNK10                            = 0x00000400, // 10
+    SPELL_ATTR9_UNK11                            = 0x00000800, // 11
+    SPELL_ATTR9_UNK12                            = 0x00001000, // 12
+    SPELL_ATTR9_SLAM                             = 0x00002000, // 13
+    SPELL_ATTR9_USABLE_IN_RATED_BATTLEGROUNDS    = 0x00004000, // 14 Can be used in Rated Battlegrounds
+    SPELL_ATTR9_UNK15                            = 0x00008000, // 15
+    SPELL_ATTR9_UNK16                            = 0x00010000, // 16
+    SPELL_ATTR9_UNK17                            = 0x00020000, // 17
+    SPELL_ATTR9_UNK18                            = 0x00040000, // 18
+    SPELL_ATTR9_ALLOW_DARK_SIMULACRUM            = 0x00080000, // 19 Allow Dark Simulacrum
+    SPELL_ATTR9_UNK20                            = 0x00100000, // 20
+    SPELL_ATTR9_UNK21                            = 0x00200000, // 21
+    SPELL_ATTR9_UNK22                            = 0x00400000, // 22
+    SPELL_ATTR9_UNK23                            = 0x00800000, // 23
+    SPELL_ATTR9_UNK24                            = 0x01000000, // 24
+    SPELL_ATTR9_UNK25                            = 0x02000000, // 25
+    SPELL_ATTR9_UNK26                            = 0x04000000, // 26
+    SPELL_ATTR9_UNK27                            = 0x08000000, // 27
+    SPELL_ATTR9_UNK28                            = 0x10000000, // 28
+    SPELL_ATTR9_UNK29                            = 0x20000000, // 29
+    SPELL_ATTR9_UNK30                            = 0x40000000, // 30
+    SPELL_ATTR9_UNK31                            = 0x80000000  // 31
+};
+
+enum SpellAttr10
+{
+    SPELL_ATTR10_BYPASS_VISIBILITY_CHECK          = 0x00000001, //  0 Bypass Visibility Check
+    SPELL_ATTR10_IGNORE_POSITIVE_DAMAGE_TAKEN_MODS = 0x00000002, //  1 Ignore Positive Damage Taken Modifiers
+    SPELL_ATTR10_USES_RANGED_SLOT                 = 0x00000004, //  2 Uses Ranged Slot (Cosmetic Only)
+    SPELL_ATTR10_DONT_LOG_FULL_OVERHEAL           = 0x00000008, //  3 Do Not Log Full Overheal
+    SPELL_ATTR10_WATER_SPOUT                      = 0x00000010, //  4 NPC Knockback - ignore doors
+    SPELL_ATTR10_FORCE_NONBINARY_RESISTANCE       = 0x00000020, //  5 Force Non-Binary Resistance
+    SPELL_ATTR10_NO_SUMMON_LOG                    = 0x00000040, //  6 No Summon Log
+    SPELL_ATTR10_TELEPORT_PLAYER                  = 0x00000080, //  7 Ignore instance lock and farm limit on teleport
+    SPELL_ATTR10_AREA_EFFECTS_USE_TARGET_RADIUS   = 0x00000100, //  8 Area Effects Use Target Radius
+    SPELL_ATTR10_CHARGE_USE_ABSOLUTE_SPEED        = 0x00000200, //  9 Charge/JumpCharge - Use Absolute Speed
+    SPELL_ATTR10_PROC_COOLDOWN_PER_TARGET         = 0x00000400, // 10 Proc cooldown on a per target basis
+    SPELL_ATTR10_HERB_GATHERING_MINING            = 0x00000800, // 11 Lock chest at precast
+    SPELL_ATTR10_USE_SPELL_BASE_LEVEL_FOR_SCALING = 0x00001000, // 12 Use Spell Base Level For Scaling
+    SPELL_ATTR10_RESET_COOLDOWN_ON_ENCOUNTER_END  = 0x00002000, // 13 Reset cooldown upon ending an encounter
+    SPELL_ATTR10_ROLLING_PERIODIC                 = 0x00004000, // 14 Rolling Periodic
+    SPELL_ATTR10_SPELLBOOK_HIDDEN_UNTIL_OVERRIDEN = 0x00008000, // 15 Spellbook Hidden Until Overridden
+    SPELL_ATTR10_DEFEND_AGAINST_FRIENDLY_CAST     = 0x00010000, // 16 Defend Against Friendly Cast
+    SPELL_ATTR10_ALLOW_DEFENSE_WHILE_CASTING      = 0x00020000, // 17 Allow Defense While Casting
+    SPELL_ATTR10_ALLOW_DEFENSE_WHILE_CHANNELING   = 0x00040000, // 18 Allow Defense While Channeling
+    SPELL_ATTR10_ALLOW_FATAL_DUEL_DAMAGE          = 0x00080000, // 19 Allow Fatal Duel Damage
+    SPELL_ATTR10_MULTI_CLICK_GROUND_TARGETING     = 0x00100000, // 20 Multi-Click Ground Targeting
+    SPELL_ATTR10_AOE_CAN_HIT_SUMMONED_INVIS       = 0x00200000, // 21 AoE Can Hit Summoned Invis
+    SPELL_ATTR10_ALLOW_WHILE_STUNNED_BY_HORROR    = 0x00400000, // 22 Allow While Stunned By Horror Mechanic
+    SPELL_ATTR10_VISIBLE_ONLY_TO_CASTER           = 0x00800000, // 23 Visible only to caster (conversations only)
+    SPELL_ATTR10_UPDATE_PASSIVES_ON_APPLY_REMOVE  = 0x01000000, // 24 Update Passives on Apply/Remove
+    SPELL_ATTR10_NORMAL_MELEE_ATTACK              = 0x02000000, // 25 Normal Melee Attack
+    SPELL_ATTR10_IGNORE_FEIGN_DEATH               = 0x04000000, // 26 Ignore Feign Death
+    SPELL_ATTR10_CASTER_DEATH_CANCELS_PERSISTENT_AREA_AURAS = 0x08000000, // 27 Caster Death Cancels Persistent Area Auras
+    SPELL_ATTR10_DO_NOT_LOG_ABSORB                = 0x10000000, // 28 Do Not Log Absorb
+    SPELL_ATTR10_MOUNT_NOT_AT_ACCOUNT_LEVEL       = 0x20000000, // 29 This Mount is NOT at the account level
+    SPELL_ATTR10_PREVENT_CLIENT_CAST_CANCEL       = 0x40000000, // 30 Prevent Client Cast Cancel
+    SPELL_ATTR10_ENFORCE_FACTING_ON_PRIMARY_TARGET = 0x80000000  // 31 Enforce Facing on Primary Target Only
 };
 
 #define MIN_TALENT_SPEC         0
 #define MAX_TALENT_SPEC         1
 #define MIN_TALENT_SPECS        1
 #define MAX_TALENT_SPECS        2
-#define MAX_GLYPH_SLOT_INDEX    6
+#define MAX_GLYPH_SLOT_INDEX    9
+#define REQ_PRIMARY_TREE_TALENTS 31
 
 // Custom values
 enum SpellClickUserTypes
@@ -588,6 +784,51 @@ enum SheathTypes
 };
 
 #define MAX_SHEATHETYPE                  8
+
+enum CharacterFlags
+{
+    CHARACTER_FLAG_NONE                 = 0x00000000,
+    CHARACTER_FLAG_UNK1                 = 0x00000001,
+    CHARACTER_FLAG_UNK2                 = 0x00000002,
+    CHARACTER_FLAG_LOCKED_FOR_TRANSFER  = 0x00000004,
+    CHARACTER_FLAG_UNK4                 = 0x00000008,
+    CHARACTER_FLAG_UNK5                 = 0x00000010,
+    CHARACTER_FLAG_UNK6                 = 0x00000020,
+    CHARACTER_FLAG_UNK7                 = 0x00000040,
+    CHARACTER_FLAG_UNK8                 = 0x00000080,
+    CHARACTER_FLAG_UNK9                 = 0x00000100,
+    CHARACTER_FLAG_UNK10                = 0x00000200,
+    CHARACTER_FLAG_HIDE_HELM            = 0x00000400,
+    CHARACTER_FLAG_HIDE_CLOAK           = 0x00000800,
+    CHARACTER_FLAG_UNK13                = 0x00001000,
+    CHARACTER_FLAG_GHOST                = 0x00002000,
+    CHARACTER_FLAG_RENAME               = 0x00004000,
+    CHARACTER_FLAG_UNK16                = 0x00008000,
+    CHARACTER_FLAG_UNK17                = 0x00010000,
+    CHARACTER_FLAG_UNK18                = 0x00020000,
+    CHARACTER_FLAG_UNK19                = 0x00040000,
+    CHARACTER_FLAG_UNK20                = 0x00080000,
+    CHARACTER_FLAG_UNK21                = 0x00100000,
+    CHARACTER_FLAG_UNK22                = 0x00200000,
+    CHARACTER_FLAG_UNK23                = 0x00400000,
+    CHARACTER_FLAG_UNK24                = 0x00800000,
+    CHARACTER_FLAG_LOCKED_BY_BILLING    = 0x01000000,
+    CHARACTER_FLAG_DECLINED             = 0x02000000,
+    CHARACTER_FLAG_UNK27                = 0x04000000,
+    CHARACTER_FLAG_UNK28                = 0x08000000,
+    CHARACTER_FLAG_UNK29                = 0x10000000,
+    CHARACTER_FLAG_UNK30                = 0x20000000,
+    CHARACTER_FLAG_UNK31                = 0x40000000,
+    CHARACTER_FLAG_UNK32                = 0x80000000
+};
+
+enum CharacterCustomizeFlags
+{
+    CHAR_CUSTOMIZE_FLAG_NONE            = 0x00000000,
+    CHAR_CUSTOMIZE_FLAG_CUSTOMIZE       = 0x00000001,       // name, gender, etc...
+    CHAR_CUSTOMIZE_FLAG_FACTION         = 0x00010000,       // name, gender, faction, etc...
+    CHAR_CUSTOMIZE_FLAG_RACE            = 0x00100000        // name, gender, race, etc...
+};
 
 enum CharacterSlot
 {
@@ -633,12 +874,14 @@ enum Language
     LANG_ZOMBIE         = 36,
     LANG_GNOMISH_BINARY = 37,
     LANG_GOBLIN_BINARY  = 38,
+    LANG_WORGEN         = 39,
+    LANG_GOBLIN         = 40,
     LANG_ADDON          = 0xFFFFFFFF                        // used by addons, in 2.4.0 not exist, replaced by messagetype?
 };
 
-#define LANGUAGES_COUNT   19
+#define LANGUAGES_COUNT   21
 
-enum TeamId
+enum TeamId : uint32
 {
     TEAM_ALLIANCE = 0,
     TEAM_HORDE,
@@ -662,7 +905,7 @@ enum SpellEffects
     SPELL_EFFECT_INSTAKILL                          = 1,
     SPELL_EFFECT_SCHOOL_DAMAGE                      = 2,
     SPELL_EFFECT_DUMMY                              = 3,
-    SPELL_EFFECT_PORTAL_TELEPORT                    = 4,
+    SPELL_EFFECT_PORTAL_TELEPORT                    = 4, // Unused (4.3.4)
     SPELL_EFFECT_TELEPORT_UNITS                     = 5,
     SPELL_EFFECT_APPLY_AURA                         = 6,
     SPELL_EFFECT_ENVIRONMENTAL_DAMAGE               = 7,
@@ -671,9 +914,9 @@ enum SpellEffects
     SPELL_EFFECT_HEAL                               = 10,
     SPELL_EFFECT_BIND                               = 11,
     SPELL_EFFECT_PORTAL                             = 12,
-    SPELL_EFFECT_RITUAL_BASE                        = 13,
-    SPELL_EFFECT_RITUAL_SPECIALIZE                  = 14,
-    SPELL_EFFECT_RITUAL_ACTIVATE_PORTAL             = 15,
+    SPELL_EFFECT_RITUAL_BASE                        = 13, // Unused (4.3.4)
+    SPELL_EFFECT_RITUAL_SPECIALIZE                  = 14, // Unused (4.3.4)
+    SPELL_EFFECT_RITUAL_ACTIVATE_PORTAL             = 15, // Unused (4.3.4)
     SPELL_EFFECT_QUEST_COMPLETE                     = 16,
     SPELL_EFFECT_WEAPON_DAMAGE_NOSCHOOL             = 17,
     SPELL_EFFECT_RESURRECT                          = 18,
@@ -703,14 +946,14 @@ enum SpellEffects
     SPELL_EFFECT_JUMP_DEST                          = 42,
     SPELL_EFFECT_TELEPORT_UNITS_FACE_CASTER         = 43,
     SPELL_EFFECT_SKILL_STEP                         = 44,
-    SPELL_EFFECT_ADD_HONOR                          = 45,
+    SPELL_EFFECT_PLAY_MOVIE                         = 45,
     SPELL_EFFECT_SPAWN                              = 46,
     SPELL_EFFECT_TRADE_SKILL                        = 47,
     SPELL_EFFECT_STEALTH                            = 48,
     SPELL_EFFECT_DETECT                             = 49,
     SPELL_EFFECT_TRANS_DOOR                         = 50,
-    SPELL_EFFECT_FORCE_CRITICAL_HIT                 = 51,
-    SPELL_EFFECT_GUARANTEE_HIT                      = 52,
+    SPELL_EFFECT_FORCE_CRITICAL_HIT                 = 51, // Unused (4.3.4)
+    SPELL_EFFECT_GUARANTEE_HIT                      = 52, // Unused (4.3.4)
     SPELL_EFFECT_ENCHANT_ITEM                       = 53,
     SPELL_EFFECT_ENCHANT_ITEM_TEMPORARY             = 54,
     SPELL_EFFECT_TAMECREATURE                       = 55,
@@ -780,7 +1023,7 @@ enum SpellEffects
     SPELL_EFFECT_APPLY_AREA_AURA_PET                = 119,
     SPELL_EFFECT_TELEPORT_GRAVEYARD                 = 120,
     SPELL_EFFECT_NORMALIZED_WEAPON_DMG              = 121,
-    SPELL_EFFECT_122                                = 122,
+    SPELL_EFFECT_122                                = 122, // Unused (4.3.4)
     SPELL_EFFECT_SEND_TAXI                          = 123,
     SPELL_EFFECT_PULL_TOWARDS                       = 124,
     SPELL_EFFECT_MODIFY_THREAT_PERCENT              = 125,
@@ -789,7 +1032,7 @@ enum SpellEffects
     SPELL_EFFECT_APPLY_AREA_AURA_FRIEND             = 128,
     SPELL_EFFECT_APPLY_AREA_AURA_ENEMY              = 129,
     SPELL_EFFECT_REDIRECT_THREAT                    = 130,
-    SPELL_EFFECT_131                                = 131,
+    SPELL_EFFECT_PLAY_SOUND                         = 131,
     SPELL_EFFECT_PLAY_MUSIC                         = 132,
     SPELL_EFFECT_UNLEARN_SPECIALIZATION             = 133,
     SPELL_EFFECT_KILL_CREDIT2                       = 134,
@@ -818,206 +1061,239 @@ enum SpellEffects
     SPELL_EFFECT_CREATE_ITEM_2                      = 157,
     SPELL_EFFECT_MILLING                            = 158,
     SPELL_EFFECT_ALLOW_RENAME_PET                   = 159,
-    SPELL_EFFECT_160                                = 160,
+    SPELL_EFFECT_FORCE_CAST_2                       = 160,
     SPELL_EFFECT_TALENT_SPEC_COUNT                  = 161,
     SPELL_EFFECT_TALENT_SPEC_SELECT                 = 162,
-    SPELL_EFFECT_163                                = 163,
+    SPELL_EFFECT_163                                = 163, // Unused (4.3.4)
     SPELL_EFFECT_REMOVE_AURA                        = 164,
-    TOTAL_SPELL_EFFECTS                             = 165
+    SPELL_EFFECT_DAMAGE_FROM_MAX_HEALTH_PCT         = 165,
+    SPELL_EFFECT_GIVE_CURRENCY                      = 166,
+    SPELL_EFFECT_UPDATE_PLAYER_PHASE                = 167,
+    SPELL_EFFECT_ALLOW_CONTROL_PET                  = 168,
+    SPELL_EFFECT_DESTROY_ITEM                       = 169,
+    SPELL_EFFECT_UPDATE_ZONE_AURAS_AND_PHASES       = 170,
+    SPELL_EFFECT_SUMMON_PERSONAL_GAMEOBJECT         = 171, // Summons gamebject
+    SPELL_EFFECT_RESURRECT_WITH_AURA                = 172,
+    SPELL_EFFECT_UNLOCK_GUILD_VAULT_TAB             = 173, // Guild tab unlocked (guild perk)
+    SPELL_EFFECT_APPLY_AURA_2                       = 174,
+    SPELL_EFFECT_175                                = 175, // Unused (4.3.4)
+    SPELL_EFFECT_SANCTUARY_2                        = 176, // Some kind of sanctuary effect (Vanish)
+    SPELL_EFFECT_177                                = 177,
+    SPELL_EFFECT_178                                = 178, // Unused (4.3.4)
+    SPELL_EFFECT_CREATE_AREATRIGGER                 = 179,
+    SPELL_EFFECT_UPDATE_AREATRIGGER                 = 180, // Unused (4.3.4)
+    SPELL_EFFECT_REMOVE_TALENT                      = 181, // Unused (4.3.4)
+    SPELL_EFFECT_182                                = 182,
+    TOTAL_SPELL_EFFECTS                             = 183,
 };
 
 enum SpellCastResult
 {
-    SPELL_FAILED_SUCCESS = 0,
-    SPELL_FAILED_AFFECTING_COMBAT = 1,
-    SPELL_FAILED_ALREADY_AT_FULL_HEALTH = 2,
-    SPELL_FAILED_ALREADY_AT_FULL_MANA = 3,
-    SPELL_FAILED_ALREADY_AT_FULL_POWER = 4,
-    SPELL_FAILED_ALREADY_BEING_TAMED = 5,
-    SPELL_FAILED_ALREADY_HAVE_CHARM = 6,
-    SPELL_FAILED_ALREADY_HAVE_SUMMON = 7,
-    SPELL_FAILED_ALREADY_OPEN = 8,
-    SPELL_FAILED_AURA_BOUNCED = 9,
-    SPELL_FAILED_AUTOTRACK_INTERRUPTED = 10,
-    SPELL_FAILED_BAD_IMPLICIT_TARGETS = 11,
-    SPELL_FAILED_BAD_TARGETS = 12,
-    SPELL_FAILED_CANT_BE_CHARMED = 13,
-    SPELL_FAILED_CANT_BE_DISENCHANTED = 14,
-    SPELL_FAILED_CANT_BE_DISENCHANTED_SKILL = 15,
-    SPELL_FAILED_CANT_BE_MILLED = 16,
-    SPELL_FAILED_CANT_BE_PROSPECTED = 17,
-    SPELL_FAILED_CANT_CAST_ON_TAPPED = 18,
-    SPELL_FAILED_CANT_DUEL_WHILE_INVISIBLE = 19,
-    SPELL_FAILED_CANT_DUEL_WHILE_STEALTHED = 20,
-    SPELL_FAILED_CANT_STEALTH = 21,
-    SPELL_FAILED_CASTER_AURASTATE = 22,
-    SPELL_FAILED_CASTER_DEAD = 23,
-    SPELL_FAILED_CHARMED = 24,
-    SPELL_FAILED_CHEST_IN_USE = 25,
-    SPELL_FAILED_CONFUSED = 26,
-    SPELL_FAILED_DONT_REPORT = 27,
-    SPELL_FAILED_EQUIPPED_ITEM = 28,
-    SPELL_FAILED_EQUIPPED_ITEM_CLASS = 29,
-    SPELL_FAILED_EQUIPPED_ITEM_CLASS_MAINHAND = 30,
-    SPELL_FAILED_EQUIPPED_ITEM_CLASS_OFFHAND = 31,
-    SPELL_FAILED_ERROR = 32,
-    SPELL_FAILED_FIZZLE = 33,
-    SPELL_FAILED_FLEEING = 34,
-    SPELL_FAILED_FOOD_LOWLEVEL = 35,
-    SPELL_FAILED_HIGHLEVEL = 36,
-    SPELL_FAILED_HUNGER_SATIATED = 37,
-    SPELL_FAILED_IMMUNE = 38,
-    SPELL_FAILED_INCORRECT_AREA = 39,
-    SPELL_FAILED_INTERRUPTED = 40,
-    SPELL_FAILED_INTERRUPTED_COMBAT = 41,
-    SPELL_FAILED_ITEM_ALREADY_ENCHANTED = 42,
-    SPELL_FAILED_ITEM_GONE = 43,
-    SPELL_FAILED_ITEM_NOT_FOUND = 44,
-    SPELL_FAILED_ITEM_NOT_READY = 45,
-    SPELL_FAILED_LEVEL_REQUIREMENT = 46,
-    SPELL_FAILED_LINE_OF_SIGHT = 47,
-    SPELL_FAILED_LOWLEVEL = 48,
-    SPELL_FAILED_LOW_CASTLEVEL = 49,
-    SPELL_FAILED_MAINHAND_EMPTY = 50,
-    SPELL_FAILED_MOVING = 51,
-    SPELL_FAILED_NEED_AMMO = 52,
-    SPELL_FAILED_NEED_AMMO_POUCH = 53,
-    SPELL_FAILED_NEED_EXOTIC_AMMO = 54,
-    SPELL_FAILED_NEED_MORE_ITEMS = 55,
-    SPELL_FAILED_NOPATH = 56,
-    SPELL_FAILED_NOT_BEHIND = 57,
-    SPELL_FAILED_NOT_FISHABLE = 58,
-    SPELL_FAILED_NOT_FLYING = 59,
-    SPELL_FAILED_NOT_HERE = 60,
-    SPELL_FAILED_NOT_INFRONT = 61,
-    SPELL_FAILED_NOT_IN_CONTROL = 62,
-    SPELL_FAILED_NOT_KNOWN = 63,
-    SPELL_FAILED_NOT_MOUNTED = 64,
-    SPELL_FAILED_NOT_ON_TAXI = 65,
-    SPELL_FAILED_NOT_ON_TRANSPORT = 66,
-    SPELL_FAILED_NOT_READY = 67,
-    SPELL_FAILED_NOT_SHAPESHIFT = 68,
-    SPELL_FAILED_NOT_STANDING = 69,
-    SPELL_FAILED_NOT_TRADEABLE = 70,
-    SPELL_FAILED_NOT_TRADING = 71,
-    SPELL_FAILED_NOT_UNSHEATHED = 72,
-    SPELL_FAILED_NOT_WHILE_GHOST = 73,
-    SPELL_FAILED_NOT_WHILE_LOOTING = 74,
-    SPELL_FAILED_NO_AMMO = 75,
-    SPELL_FAILED_NO_CHARGES_REMAIN = 76,
-    SPELL_FAILED_NO_CHAMPION = 77,
-    SPELL_FAILED_NO_COMBO_POINTS = 78,
-    SPELL_FAILED_NO_DUELING = 79,
-    SPELL_FAILED_NO_ENDURANCE = 80,
-    SPELL_FAILED_NO_FISH = 81,
-    SPELL_FAILED_NO_ITEMS_WHILE_SHAPESHIFTED = 82,
-    SPELL_FAILED_NO_MOUNTS_ALLOWED = 83,
-    SPELL_FAILED_NO_PET = 84,
-    SPELL_FAILED_NO_POWER = 85,
-    SPELL_FAILED_NOTHING_TO_DISPEL = 86,
-    SPELL_FAILED_NOTHING_TO_STEAL = 87,
-    SPELL_FAILED_ONLY_ABOVEWATER = 88,
-    SPELL_FAILED_ONLY_DAYTIME = 89,
-    SPELL_FAILED_ONLY_INDOORS = 90,
-    SPELL_FAILED_ONLY_MOUNTED = 91,
-    SPELL_FAILED_ONLY_NIGHTTIME = 92,
-    SPELL_FAILED_ONLY_OUTDOORS = 93,
-    SPELL_FAILED_ONLY_SHAPESHIFT = 94,
-    SPELL_FAILED_ONLY_STEALTHED = 95,
-    SPELL_FAILED_ONLY_UNDERWATER = 96,
-    SPELL_FAILED_OUT_OF_RANGE = 97,
-    SPELL_FAILED_PACIFIED = 98,
-    SPELL_FAILED_POSSESSED = 99,
-    SPELL_FAILED_REAGENTS = 100,
-    SPELL_FAILED_REQUIRES_AREA = 101,
-    SPELL_FAILED_REQUIRES_SPELL_FOCUS = 102,
-    SPELL_FAILED_ROOTED = 103,
-    SPELL_FAILED_SILENCED = 104,
-    SPELL_FAILED_SPELL_IN_PROGRESS = 105,
-    SPELL_FAILED_SPELL_LEARNED = 106,
-    SPELL_FAILED_SPELL_UNAVAILABLE = 107,
-    SPELL_FAILED_STUNNED = 108,
-    SPELL_FAILED_TARGETS_DEAD = 109,
-    SPELL_FAILED_TARGET_AFFECTING_COMBAT = 110,
-    SPELL_FAILED_TARGET_AURASTATE = 111,
-    SPELL_FAILED_TARGET_DUELING = 112,
-    SPELL_FAILED_TARGET_ENEMY = 113,
-    SPELL_FAILED_TARGET_ENRAGED = 114,
-    SPELL_FAILED_TARGET_FRIENDLY = 115,
-    SPELL_FAILED_TARGET_IN_COMBAT = 116,
-    SPELL_FAILED_TARGET_IS_PLAYER = 117,
-    SPELL_FAILED_TARGET_IS_PLAYER_CONTROLLED = 118,
-    SPELL_FAILED_TARGET_NOT_DEAD = 119,
-    SPELL_FAILED_TARGET_NOT_IN_PARTY = 120,
-    SPELL_FAILED_TARGET_NOT_LOOTED = 121,
-    SPELL_FAILED_TARGET_NOT_PLAYER = 122,
-    SPELL_FAILED_TARGET_NO_POCKETS = 123,
-    SPELL_FAILED_TARGET_NO_WEAPONS = 124,
-    SPELL_FAILED_TARGET_NO_RANGED_WEAPONS = 125,
-    SPELL_FAILED_TARGET_UNSKINNABLE = 126,
-    SPELL_FAILED_THIRST_SATIATED = 127,
-    SPELL_FAILED_TOO_CLOSE = 128,
-    SPELL_FAILED_TOO_MANY_OF_ITEM = 129,
-    SPELL_FAILED_TOTEM_CATEGORY = 130,
-    SPELL_FAILED_TOTEMS = 131,
-    SPELL_FAILED_TRY_AGAIN = 132,
-    SPELL_FAILED_UNIT_NOT_BEHIND = 133,
-    SPELL_FAILED_UNIT_NOT_INFRONT = 134,
-    SPELL_FAILED_WRONG_PET_FOOD = 135,
-    SPELL_FAILED_NOT_WHILE_FATIGUED = 136,
-    SPELL_FAILED_TARGET_NOT_IN_INSTANCE = 137,
-    SPELL_FAILED_NOT_WHILE_TRADING = 138,
-    SPELL_FAILED_TARGET_NOT_IN_RAID = 139,
-    SPELL_FAILED_TARGET_FREEFORALL = 140,
-    SPELL_FAILED_NO_EDIBLE_CORPSES = 141,
-    SPELL_FAILED_ONLY_BATTLEGROUNDS = 142,
-    SPELL_FAILED_TARGET_NOT_GHOST = 143,
-    SPELL_FAILED_TRANSFORM_UNUSABLE = 144,
-    SPELL_FAILED_WRONG_WEATHER = 145,
-    SPELL_FAILED_DAMAGE_IMMUNE = 146,
-    SPELL_FAILED_PREVENTED_BY_MECHANIC = 147,
-    SPELL_FAILED_PLAY_TIME = 148,
-    SPELL_FAILED_REPUTATION = 149,
-    SPELL_FAILED_MIN_SKILL = 150,
-    SPELL_FAILED_NOT_IN_ARENA = 151,
-    SPELL_FAILED_NOT_ON_SHAPESHIFT = 152,
-    SPELL_FAILED_NOT_ON_STEALTHED = 153,
-    SPELL_FAILED_NOT_ON_DAMAGE_IMMUNE = 154,
-    SPELL_FAILED_NOT_ON_MOUNTED = 155,
-    SPELL_FAILED_TOO_SHALLOW = 156,
-    SPELL_FAILED_TARGET_NOT_IN_SANCTUARY = 157,
-    SPELL_FAILED_TARGET_IS_TRIVIAL = 158,
-    SPELL_FAILED_BM_OR_INVISGOD = 159,
-    SPELL_FAILED_EXPERT_RIDING_REQUIREMENT = 160,
-    SPELL_FAILED_ARTISAN_RIDING_REQUIREMENT = 161,
-    SPELL_FAILED_NOT_IDLE = 162,
-    SPELL_FAILED_NOT_INACTIVE = 163,
-    SPELL_FAILED_PARTIAL_PLAYTIME = 164,
-    SPELL_FAILED_NO_PLAYTIME = 165,
-    SPELL_FAILED_NOT_IN_BATTLEGROUND = 166,
-    SPELL_FAILED_NOT_IN_RAID_INSTANCE = 167,
-    SPELL_FAILED_ONLY_IN_ARENA = 168,
-    SPELL_FAILED_TARGET_LOCKED_TO_RAID_INSTANCE = 169,
-    SPELL_FAILED_ON_USE_ENCHANT = 170,
-    SPELL_FAILED_NOT_ON_GROUND = 171,
-    SPELL_FAILED_CUSTOM_ERROR = 172,
-    SPELL_FAILED_CANT_DO_THAT_RIGHT_NOW = 173,
-    SPELL_FAILED_TOO_MANY_SOCKETS = 174,
-    SPELL_FAILED_INVALID_GLYPH = 175,
-    SPELL_FAILED_UNIQUE_GLYPH = 176,
-    SPELL_FAILED_GLYPH_SOCKET_LOCKED = 177,
-    SPELL_FAILED_NO_VALID_TARGETS = 178,
-    SPELL_FAILED_ITEM_AT_MAX_CHARGES = 179,
-    SPELL_FAILED_NOT_IN_BARBERSHOP = 180,
-    SPELL_FAILED_FISHING_TOO_LOW = 181,
-    SPELL_FAILED_ITEM_ENCHANT_TRADE_WINDOW = 182,
-    SPELL_FAILED_SUMMON_PENDING = 183,
-    SPELL_FAILED_MAX_SOCKETS = 184,
-    SPELL_FAILED_PET_CAN_RENAME = 185,
-    SPELL_FAILED_TARGET_CANNOT_BE_RESURRECTED = 186,
-    SPELL_FAILED_UNKNOWN = 187, // actually doesn't exist in client
-
-    SPELL_CAST_OK = 255 // custom value, must not be sent to client
+    SPELL_FAILED_SUCCESS                        = 0,
+    SPELL_FAILED_AFFECTING_COMBAT               = 1,
+    SPELL_FAILED_ALREADY_AT_FULL_HEALTH         = 2,
+    SPELL_FAILED_ALREADY_AT_FULL_MANA           = 3,
+    SPELL_FAILED_ALREADY_AT_FULL_POWER          = 4,
+    SPELL_FAILED_ALREADY_BEING_TAMED            = 5,
+    SPELL_FAILED_ALREADY_HAVE_CHARM             = 6,
+    SPELL_FAILED_ALREADY_HAVE_SUMMON            = 7,
+    SPELL_FAILED_ALREADY_HAVE_PET               = 8,
+    SPELL_FAILED_ALREADY_OPEN                   = 9,
+    SPELL_FAILED_AURA_BOUNCED                   = 10,
+    SPELL_FAILED_AUTOTRACK_INTERRUPTED          = 11,
+    SPELL_FAILED_BAD_IMPLICIT_TARGETS           = 12,
+    SPELL_FAILED_BAD_TARGETS                    = 13,
+    SPELL_FAILED_CANT_BE_CHARMED                = 14,
+    SPELL_FAILED_CANT_BE_DISENCHANTED           = 15,
+    SPELL_FAILED_CANT_BE_DISENCHANTED_SKILL     = 16,
+    SPELL_FAILED_CANT_BE_MILLED                 = 17,
+    SPELL_FAILED_CANT_BE_PROSPECTED             = 18,
+    SPELL_FAILED_CANT_CAST_ON_TAPPED            = 19,
+    SPELL_FAILED_CANT_DUEL_WHILE_INVISIBLE      = 20,
+    SPELL_FAILED_CANT_DUEL_WHILE_STEALTHED      = 21,
+    SPELL_FAILED_CANT_STEALTH                   = 22,
+    SPELL_FAILED_CASTER_AURASTATE               = 23,
+    SPELL_FAILED_CASTER_DEAD                    = 24,
+    SPELL_FAILED_CHARMED                        = 25,
+    SPELL_FAILED_CHEST_IN_USE                   = 26,
+    SPELL_FAILED_CONFUSED                       = 27,
+    SPELL_FAILED_DONT_REPORT                    = 28,
+    SPELL_FAILED_EQUIPPED_ITEM                  = 29,
+    SPELL_FAILED_EQUIPPED_ITEM_CLASS            = 30,
+    SPELL_FAILED_EQUIPPED_ITEM_CLASS_MAINHAND   = 31,
+    SPELL_FAILED_EQUIPPED_ITEM_CLASS_OFFHAND    = 32,
+    SPELL_FAILED_ERROR                          = 33,
+    SPELL_FAILED_FALLING                        = 34,
+    SPELL_FAILED_FIZZLE                         = 35,
+    SPELL_FAILED_FLEEING                        = 36,
+    SPELL_FAILED_FOOD_LOWLEVEL                  = 37,
+    SPELL_FAILED_HIGHLEVEL                      = 38,
+    SPELL_FAILED_HUNGER_SATIATED                = 39,
+    SPELL_FAILED_IMMUNE                         = 40,
+    SPELL_FAILED_INCORRECT_AREA                 = 41,
+    SPELL_FAILED_INTERRUPTED                    = 42,
+    SPELL_FAILED_INTERRUPTED_COMBAT             = 43,
+    SPELL_FAILED_ITEM_ALREADY_ENCHANTED         = 44,
+    SPELL_FAILED_ITEM_GONE                      = 45,
+    SPELL_FAILED_ITEM_NOT_FOUND                 = 46,
+    SPELL_FAILED_ITEM_NOT_READY                 = 47,
+    SPELL_FAILED_LEVEL_REQUIREMENT              = 48,
+    SPELL_FAILED_LINE_OF_SIGHT                  = 49,
+    SPELL_FAILED_LOWLEVEL                       = 50,
+    SPELL_FAILED_LOW_CASTLEVEL                  = 51,
+    SPELL_FAILED_MAINHAND_EMPTY                 = 52,
+    SPELL_FAILED_MOVING                         = 53,
+    SPELL_FAILED_NEED_AMMO                      = 54,
+    SPELL_FAILED_NEED_AMMO_POUCH                = 55,
+    SPELL_FAILED_NEED_EXOTIC_AMMO               = 56,
+    SPELL_FAILED_NEED_MORE_ITEMS                = 57,
+    SPELL_FAILED_NOPATH                         = 58,
+    SPELL_FAILED_NOT_BEHIND                     = 59,
+    SPELL_FAILED_NOT_FISHABLE                   = 60,
+    SPELL_FAILED_NOT_FLYING                     = 61,
+    SPELL_FAILED_NOT_HERE                       = 62,
+    SPELL_FAILED_NOT_INFRONT                    = 63,
+    SPELL_FAILED_NOT_IN_CONTROL                 = 64,
+    SPELL_FAILED_NOT_KNOWN                      = 65,
+    SPELL_FAILED_NOT_MOUNTED                    = 66,
+    SPELL_FAILED_NOT_ON_TAXI                    = 67,
+    SPELL_FAILED_NOT_ON_TRANSPORT               = 68,
+    SPELL_FAILED_NOT_READY                      = 69,
+    SPELL_FAILED_NOT_SHAPESHIFT                 = 70,
+    SPELL_FAILED_NOT_STANDING                   = 71,
+    SPELL_FAILED_NOT_TRADEABLE                  = 72,
+    SPELL_FAILED_NOT_TRADING                    = 73,
+    SPELL_FAILED_NOT_UNSHEATHED                 = 74,
+    SPELL_FAILED_NOT_WHILE_GHOST                = 75,
+    SPELL_FAILED_NOT_WHILE_LOOTING              = 76,
+    SPELL_FAILED_NO_AMMO                        = 77,
+    SPELL_FAILED_NO_CHARGES_REMAIN              = 78,
+    SPELL_FAILED_NO_CHAMPION                    = 79,
+    SPELL_FAILED_NO_COMBO_POINTS                = 80,
+    SPELL_FAILED_NO_DUELING                     = 81,
+    SPELL_FAILED_NO_ENDURANCE                   = 82,
+    SPELL_FAILED_NO_FISH                        = 83,
+    SPELL_FAILED_NO_ITEMS_WHILE_SHAPESHIFTED    = 84,
+    SPELL_FAILED_NO_MOUNTS_ALLOWED              = 85,
+    SPELL_FAILED_NO_PET                         = 86,
+    SPELL_FAILED_NO_POWER                       = 87,
+    SPELL_FAILED_NOTHING_TO_DISPEL              = 88,
+    SPELL_FAILED_NOTHING_TO_STEAL               = 89,
+    SPELL_FAILED_ONLY_ABOVEWATER                = 90,
+    SPELL_FAILED_ONLY_DAYTIME                   = 91,
+    SPELL_FAILED_ONLY_INDOORS                   = 92,
+    SPELL_FAILED_ONLY_MOUNTED                   = 93,
+    SPELL_FAILED_ONLY_NIGHTTIME                 = 94,
+    SPELL_FAILED_ONLY_OUTDOORS                  = 95,
+    SPELL_FAILED_ONLY_SHAPESHIFT                = 96,
+    SPELL_FAILED_ONLY_STEALTHED                 = 97,
+    SPELL_FAILED_ONLY_UNDERWATER                = 98,
+    SPELL_FAILED_OUT_OF_RANGE                   = 99,
+    SPELL_FAILED_PACIFIED                       = 100,
+    SPELL_FAILED_POSSESSED                      = 101,
+    SPELL_FAILED_REAGENTS                       = 102,
+    SPELL_FAILED_REQUIRES_AREA                  = 103,
+    SPELL_FAILED_REQUIRES_SPELL_FOCUS           = 104,
+    SPELL_FAILED_ROOTED                         = 105,
+    SPELL_FAILED_SILENCED                       = 106,
+    SPELL_FAILED_SPELL_IN_PROGRESS              = 107,
+    SPELL_FAILED_SPELL_LEARNED                  = 108,
+    SPELL_FAILED_SPELL_UNAVAILABLE              = 109,
+    SPELL_FAILED_STUNNED                        = 110,
+    SPELL_FAILED_TARGETS_DEAD                   = 111,
+    SPELL_FAILED_TARGET_AFFECTING_COMBAT        = 112,
+    SPELL_FAILED_TARGET_AURASTATE               = 113,
+    SPELL_FAILED_TARGET_DUELING                 = 114,
+    SPELL_FAILED_TARGET_ENEMY                   = 115,
+    SPELL_FAILED_TARGET_ENRAGED                 = 116,
+    SPELL_FAILED_TARGET_FRIENDLY                = 117,
+    SPELL_FAILED_TARGET_IN_COMBAT               = 118,
+    SPELL_FAILED_TARGET_IS_PLAYER               = 119,
+    SPELL_FAILED_TARGET_IS_PLAYER_CONTROLLED    = 120,
+    SPELL_FAILED_TARGET_NOT_DEAD                = 121,
+    SPELL_FAILED_TARGET_NOT_IN_PARTY            = 122,
+    SPELL_FAILED_TARGET_NOT_LOOTED              = 123,
+    SPELL_FAILED_TARGET_NOT_PLAYER              = 124,
+    SPELL_FAILED_TARGET_NO_POCKETS              = 125,
+    SPELL_FAILED_TARGET_NO_WEAPONS              = 126,
+    SPELL_FAILED_TARGET_NO_RANGED_WEAPONS       = 127,
+    SPELL_FAILED_TARGET_UNSKINNABLE             = 128,
+    SPELL_FAILED_THIRST_SATIATED                = 129,
+    SPELL_FAILED_TOO_CLOSE                      = 130,
+    SPELL_FAILED_TOO_MANY_OF_ITEM               = 131,
+    SPELL_FAILED_TOTEM_CATEGORY                 = 132,
+    SPELL_FAILED_TOTEMS                         = 133,
+    SPELL_FAILED_TRY_AGAIN                      = 134,
+    SPELL_FAILED_UNIT_NOT_BEHIND                = 135,
+    SPELL_FAILED_UNIT_NOT_INFRONT               = 136,
+    SPELL_FAILED_VISION_OBSCURED                = 137,
+    SPELL_FAILED_WRONG_PET_FOOD                 = 138,
+    SPELL_FAILED_NOT_WHILE_FATIGUED             = 139,
+    SPELL_FAILED_TARGET_NOT_IN_INSTANCE         = 140,
+    SPELL_FAILED_NOT_WHILE_TRADING              = 141,
+    SPELL_FAILED_TARGET_NOT_IN_RAID             = 142,
+    SPELL_FAILED_TARGET_FREEFORALL              = 143,
+    SPELL_FAILED_NO_EDIBLE_CORPSES              = 144,
+    SPELL_FAILED_ONLY_BATTLEGROUNDS             = 145,
+    SPELL_FAILED_TARGET_NOT_GHOST               = 146,
+    SPELL_FAILED_TRANSFORM_UNUSABLE             = 147,
+    SPELL_FAILED_WRONG_WEATHER                  = 148,
+    SPELL_FAILED_DAMAGE_IMMUNE                  = 149,
+    SPELL_FAILED_PREVENTED_BY_MECHANIC          = 150,
+    SPELL_FAILED_PLAY_TIME                      = 151,
+    SPELL_FAILED_REPUTATION                     = 152,
+    SPELL_FAILED_MIN_SKILL                      = 153,
+    SPELL_FAILED_NOT_IN_RATED_BATTLEGROUND      = 154,
+    SPELL_FAILED_NOT_ON_SHAPESHIFT              = 155,
+    SPELL_FAILED_NOT_ON_STEALTHED               = 156,
+    SPELL_FAILED_NOT_ON_DAMAGE_IMMUNE           = 157,
+    SPELL_FAILED_NOT_ON_MOUNTED                 = 158,
+    SPELL_FAILED_TOO_SHALLOW                    = 159,
+    SPELL_FAILED_TARGET_NOT_IN_SANCTUARY        = 160,
+    SPELL_FAILED_TARGET_IS_TRIVIAL              = 161,
+    SPELL_FAILED_BM_OR_INVISGOD                 = 162,
+    SPELL_FAILED_EXPERT_RIDING_REQUIREMENT      = 163,
+    SPELL_FAILED_ARTISAN_RIDING_REQUIREMENT     = 164,
+    SPELL_FAILED_NOT_IDLE                       = 165,
+    SPELL_FAILED_NOT_INACTIVE                   = 166,
+    SPELL_FAILED_PARTIAL_PLAYTIME               = 167,
+    SPELL_FAILED_NO_PLAYTIME                    = 168,
+    SPELL_FAILED_NOT_IN_BATTLEGROUND            = 169,
+    SPELL_FAILED_NOT_IN_RAID_INSTANCE           = 170,
+    SPELL_FAILED_ONLY_IN_ARENA                  = 171,
+    SPELL_FAILED_TARGET_LOCKED_TO_RAID_INSTANCE = 172,
+    SPELL_FAILED_ON_USE_ENCHANT                 = 173,
+    SPELL_FAILED_NOT_ON_GROUND                  = 174,
+    SPELL_FAILED_CUSTOM_ERROR                   = 175,
+    SPELL_FAILED_CANT_DO_THAT_RIGHT_NOW         = 176,
+    SPELL_FAILED_TOO_MANY_SOCKETS               = 177,
+    SPELL_FAILED_INVALID_GLYPH                  = 178,
+    SPELL_FAILED_UNIQUE_GLYPH                   = 179,
+    SPELL_FAILED_GLYPH_SOCKET_LOCKED            = 180,
+    SPELL_FAILED_NO_VALID_TARGETS               = 181,
+    SPELL_FAILED_ITEM_AT_MAX_CHARGES            = 182,
+    SPELL_FAILED_NOT_IN_BARBERSHOP              = 183,
+    SPELL_FAILED_FISHING_TOO_LOW                = 184,
+    SPELL_FAILED_ITEM_ENCHANT_TRADE_WINDOW      = 185,
+    SPELL_FAILED_SUMMON_PENDING                 = 186,
+    SPELL_FAILED_MAX_SOCKETS                    = 187,
+    SPELL_FAILED_PET_CAN_RENAME                 = 188,
+    SPELL_FAILED_TARGET_CANNOT_BE_RESURRECTED   = 189,
+    SPELL_FAILED_NO_ACTIONS                     = 190,
+    SPELL_FAILED_CURRENCY_WEIGHT_MISMATCH       = 191,
+    SPELL_FAILED_WEIGHT_NOT_ENOUGH              = 192,
+    SPELL_FAILED_WEIGHT_TOO_MUCH                = 193,
+    SPELL_FAILED_NO_VACANT_SEAT                 = 194,
+    SPELL_FAILED_NO_LIQUID                      = 195,
+    SPELL_FAILED_ONLY_NOT_SWIMMING              = 196,
+    SPELL_FAILED_BY_NOT_MOVING                  = 197,
+    SPELL_FAILED_IN_COMBAT_RES_LIMIT_REACHED    = 198,
+    SPELL_FAILED_NOT_IN_ARENA                   = 199,
+    SPELL_FAILED_TARGET_NOT_GROUNDED            = 200,
+    SPELL_FAILED_EXCEEDED_WEEKLY_USAGE          = 201,
+    SPELL_FAILED_NOT_IN_LFG_DUNGEON             = 202,
+    SPELL_FAILED_UNKNOWN                        = 254, // custom value, default case
+    SPELL_CAST_OK                               = 255, // custom value, must not be sent to client
 };
 
 enum SpellCustomErrors
@@ -1090,38 +1366,80 @@ enum SpellCustomErrors
     SPELL_CUSTOM_ERROR_GM_ONLY                          = 65, // Only GMs may use that. Your account has been reported for investigation.
     SPELL_CUSTOM_ERROR_REQUIRES_LEVEL_58                = 66, // You must reach level 58 to use this portal.
     SPELL_CUSTOM_ERROR_AT_HONOR_CAP                     = 67, // You already have the maximum amount of honor.
-    SPELL_CUSTOM_ERROR_68                               = 68, // ""
-    SPELL_CUSTOM_ERROR_69                               = 69, // ""
-    SPELL_CUSTOM_ERROR_70                               = 70, // ""
-    SPELL_CUSTOM_ERROR_71                               = 71, // ""
-    SPELL_CUSTOM_ERROR_72                               = 72, // ""
-    SPELL_CUSTOM_ERROR_73                               = 73, // ""
-    SPELL_CUSTOM_ERROR_74                               = 74, // ""
+    SPELL_CUSTOM_ERROR_HAVE_HOT_ROD                     = 68, // You already have a Hot Rod.
+    SPELL_CUSTOM_ERROR_PARTYGOER_MORE_BUBBLY            = 69, // This partygoer wants some more bubbly
+    SPELL_CUSTOM_ERROR_PARTYGOER_NEED_BUCKET            = 70, // This partygoer needs a bucket!
+    SPELL_CUSTOM_ERROR_PARTYGOER_WANT_TO_DANCE          = 71, // This partygoer wants to dance with you.
+    SPELL_CUSTOM_ERROR_PARTYGOER_WANT_FIREWORKS         = 72, // This partygoer wants to see some fireworks.
+    SPELL_CUSTOM_ERROR_PARTYGOER_WANT_APPETIZER         = 73, // This partygoer wants some more hors d'oeuvres.
+    SPELL_CUSTOM_ERROR_GOBLIN_BATTERY_DEPLETED          = 74, // The Goblin All-In-1-Der Belt's battery is depleted.
     SPELL_CUSTOM_ERROR_MUST_HAVE_DEMONIC_CIRCLE         = 75, // You must have a demonic circle active.
     SPELL_CUSTOM_ERROR_AT_MAX_RAGE                      = 76, // You already have maximum rage
     SPELL_CUSTOM_ERROR_REQUIRES_350_ENGINEERING         = 77, // Requires Engineering (350)
     SPELL_CUSTOM_ERROR_SOUL_BELONGS_TO_LICH_KING        = 78, // Your soul belongs to the Lich King
     SPELL_CUSTOM_ERROR_ATTENDANT_HAS_PONY               = 79, // Your attendant already has an Argent Pony
-    SPELL_CUSTOM_ERROR_80                               = 80, // ""
-    SPELL_CUSTOM_ERROR_81                               = 81, // ""
-    SPELL_CUSTOM_ERROR_82                               = 82, // ""
+    SPELL_CUSTOM_ERROR_GOBLIN_STARTING_MISSION          = 80, // First, Overload the Defective Generator, Activate the Leaky Stove, and Drop a Cigar on the Flammable Bed.
+    SPELL_CUSTOM_ERROR_GASBOT_ALREADY_SENT              = 81, // You've already sent in the Gasbot and destroyed headquarters!
+    SPELL_CUSTOM_ERROR_GOBLIN_IS_PARTIED_OUT            = 82, // This goblin is all partied out!
     SPELL_CUSTOM_ERROR_MUST_HAVE_FIRE_TOTEM             = 83, // You must have a Fire Totem active.
     SPELL_CUSTOM_ERROR_CANT_TARGET_VAMPIRES             = 84, // You may not bite other vampires.
     SPELL_CUSTOM_ERROR_PET_ALREADY_AT_YOUR_LEVEL        = 85, // Your pet is already at your level.
     SPELL_CUSTOM_ERROR_MISSING_ITEM_REQUIREMENS         = 86, // You do not meet the level requirements for this item.
     SPELL_CUSTOM_ERROR_TOO_MANY_ABOMINATIONS            = 87, // There are too many Mutated Abominations.
     SPELL_CUSTOM_ERROR_ALL_POTIONS_USED                 = 88, // The potions have all been depleted by Professor Putricide.
-    SPELL_CUSTOM_ERROR_89                               = 89, // ""
+    SPELL_CUSTOM_ERROR_DEFEATED_ENOUGH_ALREADY          = 89, // You have already defeated enough of them.
     SPELL_CUSTOM_ERROR_REQUIRES_LEVEL_65                = 90, // Requires level 65
-    SPELL_CUSTOM_ERROR_91                               = 91, // ""
-    SPELL_CUSTOM_ERROR_92                               = 92, // ""
-    SPELL_CUSTOM_ERROR_93                               = 93, // ""
-    SPELL_CUSTOM_ERROR_94                               = 94, // ""
-    SPELL_CUSTOM_ERROR_95                               = 95, // ""
+    SPELL_CUSTOM_ERROR_DESTROYED_KTC_OIL_PLATFORM       = 91, // You have already destroyed the KTC Oil Platform.
+    SPELL_CUSTOM_ERROR_LAUNCHED_ENOUGH_CAGES            = 92, // You have already launched enough cages.
+    SPELL_CUSTOM_ERROR_REQUIRES_BOOSTER_ROCKETS         = 93, // Requires Single-Stage Booster Rockets. Return to Hobart Grapplehammer to get more.
+    SPELL_CUSTOM_ERROR_ENOUGH_WILD_CLUCKERS             = 94, // You have already captured enough wild cluckers.
+    SPELL_CUSTOM_ERROR_REQUIRES_CONTROL_FIREWORKS       = 95, // Requires Remote Control Fireworks. Return to Hobart Grapplehammer to get more.
     SPELL_CUSTOM_ERROR_MAX_NUMBER_OF_RECRUITS           = 96, // You already have the max number of recruits.
     SPELL_CUSTOM_ERROR_MAX_NUMBER_OF_VOLUNTEERS         = 97, // You already have the max number of volunteers.
-    SPELL_CUSTOM_ERROR_FROSTMOURNE_RENDERED_RESSURECT   = 98, // Frostmourne has rendered you unable to ressurect.
-    SPELL_CUSTOM_ERROR_CANT_MOUNT_WITH_SHAPESHIFT       = 99  // You can't mount while affected by that shapeshift.
+    SPELL_CUSTOM_ERROR_FROSTMOURNE_RENDERED_RESURRECT   = 98, // Frostmourne has rendered you unable to resurrect.
+    SPELL_CUSTOM_ERROR_CANT_MOUNT_WITH_SHAPESHIFT       = 99, // You can't mount while affected by that shapeshift.
+    SPELL_CUSTOM_ERROR_FAWNS_ALREADY_FOLLOWING          = 100, // Three fawns are already following you!
+    SPELL_CUSTOM_ERROR_ALREADY_HAVE_RIVER_BOAT          = 101, // You already have a River Boat.
+    SPELL_CUSTOM_ERROR_NO_ACTIVE_ENCHANTMENT            = 102, // You have no active enchantment to unleash.
+    SPELL_CUSTOM_ERROR_ENOUGH_HIGHBOURNE_SOULS          = 103, // You have bound enough Highborne souls. Return to Arcanist Valdurian.
+    SPELL_CUSTOM_ERROR_ATLEAST_40YD_FROM_OIL_DRILLING   = 104, // You must be at least 40 yards away from all other Oil Drilling Rigs.
+    SPELL_CUSTOM_ERROR_ABOVE_ENSLAVED_PEARL_MINER       = 106, // You must be above the Enslaved Pearl Miner.
+    SPELL_CUSTOM_ERROR_MUST_TARGET_CORPSE_SPECIAL_1     = 107, // You must target the corpse of a Seabrush Terrapin, Scourgut Remora, or Spinescale Hammerhead.
+    SPELL_CUSTOM_ERROR_SLAGHAMMER_ALREADY_PRISONER      = 108, // Ambassador Slaghammer is already your prisoner.
+    SPELL_CUSTOM_ERROR_REQUIRE_ATTUNED_LOCATION_1       = 109, // Requires a location that is attuned with the Naz'jar Battlemaiden.
+    SPELL_CUSTOM_ERROR_NEED_TO_FREE_DRAKE_FIRST         = 110, // Free the Drake from the net first!
+    SPELL_CUSTOM_ERROR_DRAGONMAW_ALLIES_ALREADY_FOLLOW  = 111, // You already have three Dragonmaw allies following you.
+    SPELL_CUSTOM_ERROR_REQUIRE_OPPOSABLE_THUMBS         = 112, // Requires Opposable Thumbs.
+    SPELL_CUSTOM_ERROR_NOT_ENOUGH_HEALTH_2              = 113, // Not enough health
+    SPELL_CUSTOM_ERROR_ENOUGH_FORSAKEN_TROOPERS         = 114, // You already have enough Forsaken Troopers.
+    SPELL_CUSTOM_ERROR_CANNOT_JUMP_TO_BOULDER           = 115, // You cannot jump to another boulder yet.
+    SPELL_CUSTOM_ERROR_SKILL_TOO_HIGH                   = 116, // Skill too high.
+    SPELL_CUSTOM_ERROR_ALREADY_6_SURVIVORS_RESCUED      = 117, // You have already rescued 6 Survivors.
+    SPELL_CUSTOM_ERROR_MUST_FACE_SHIPS_FROM_BALLOON     = 118, // You need to be facing the ships from the rescue balloon.
+    SPELL_CUSTOM_ERROR_CANNOT_SUPERVISE_MORE_CULTISTS   = 119, // You cannot supervise more than 5 Arrested Cultists at a time.
+    SPELL_CUSTOM_ERROR_REQUIRES_LEVEL_85                = 120, // You must reach level 85 to use this portal.
+    SPELL_CUSTOM_ERROR_MUST_BE_BELOW_35_HEALTH          = 121, // Your target must be below 35% health.
+    SPELL_CUSTOM_ERROR_MUST_SELECT_TALENT_SPECIAL       = 122, // You must select a talent specialization first.
+    SPELL_CUSTOM_ERROR_TOO_WISE_AND_POWERFUL            = 123, // You are too wise and powerful to gain any benefit from that item.
+    SPELL_CUSTOM_ERROR_TOO_CLOSE_ARGENT_LIGHTWELL       = 124, // You are within 10 yards of another Argent Lightwell.
+    SPELL_CUSTOM_ERROR_NOT_WHILE_SHAPESHIFTED           = 125, // You can't do that while shapeshifted.
+    SPELL_CUSTOM_ERROR_MANA_GEM_IN_BANK                 = 126, // You already have a Mana Gem in your bank.
+    SPELL_CUSTOM_ERROR_FLAME_SHOCK_NOT_ACTIVE           = 127, // You must have at least one Flame Shock active.
+    SPELL_CUSTOM_ERROR_CANT_TRANSFORM                   = 128, // You cannot transform right now
+    SPELL_CUSTOM_ERROR_PET_MUST_BE_ATTACKING            = 129, // Your pet must be attacking a target.
+    SPELL_CUSTOM_ERROR_GNOMISH_ENGINEERING              = 130, // Requires Gnomish Engineering
+    SPELL_CUSTOM_ERROR_GOBLIN_ENGINEERING               = 131, // Requires Goblin Engineering
+    SPELL_CUSTOM_ERROR_NO_TARGET                        = 132, // You have no target.
+    SPELL_CUSTOM_ERROR_PET_OUT_OF_RANGE                 = 133, // Your Pet is out of range of the target.
+    SPELL_CUSTOM_ERROR_HOLDING_FLAG                     = 134, // You can't do that while holding the flag.
+    SPELL_CUSTOM_ERROR_TARGET_HOLDING_FLAG              = 135, // You can't do that to targets holding the flag.
+    SPELL_CUSTOM_ERROR_PORTAL_NOT_OPEN                  = 136, // The portal is not yet open. Continue helping the druids at the Sanctuary of Malorne.
+    SPELL_CUSTOM_ERROR_AGGRA_AIR_TOTEM                  = 137, // You need to be closer to Aggra's Air Totem, in the west.
+    SPELL_CUSTOM_ERROR_AGGRA_WATER_TOTEM                = 138, // You need to be closer to Aggra's Water Totem, in the north.
+    SPELL_CUSTOM_ERROR_AGGRA_EARTH_TOTEM                = 139, // You need to be closer to Aggra's Earth Totem, in the east.
+    SPELL_CUSTOM_ERROR_AGGRA_FIRE_TOTEM                 = 140, // You need to be closer to Aggra's Fire Totem, near Thrall.
+    SPELL_CUSTOM_ERROR_TARGET_HAS_STARTDUST_2           = 148, // Target is already affected by Stardust No. 2.
+    SPELL_CUSTOM_ERROR_ELEMENTIUM_GEM_CLUSTERS          = 149  // You cannot deconstruct Elementium Gem Clusters while collecting them!
 };
 
 enum StealthType
@@ -1146,8 +1464,34 @@ enum InvisibilityType
     INVISIBILITY_UNK9        =  9,
     INVISIBILITY_UNK10       = 10,
     INVISIBILITY_UNK11       = 11,
+    INVISIBILITY_UNK12       = 12,
+    INVISIBILITY_TRA13       = 13,
+    INVISIBILITY_UNK14       = 14,
+    INVISIBILITY_UNK15       = 15,
+    INVISIBILITY_UNK16       = 16,
+    INVISIBILITY_UNK17       = 17,
+    INVISIBILITY_UNK18       = 18,
+    INVISIBILITY_UNK19       = 19,
+    INVISIBILITY_UNK20       = 20,
+    INVISIBILITY_UNK21       = 21,
+    INVISIBILITY_UNK22       = 22,
+    INVISIBILITY_TRA23       = 23,
+    INVISIBILITY_UNK24       = 24,
+    INVISIBILITY_UNK25       = 25,
+    INVISIBILITY_UNK26       = 26,
+    INVISIBILITY_UNK27       = 27,
+    INVISIBILITY_UNK28       = 28,
+    INVISIBILITY_UNK29       = 29,
+    INVISIBILITY_UNK30       = 30,
+    INVISIBILITY_UNK31       = 31,
+    INVISIBILITY_UNK32       = 32,
+    INVISIBILITY_UNK33       = 33,
+    INVISIBILITY_UNK34       = 34,
+    INVISIBILITY_UNK35       = 35,
+    INVISIBILITY_UNK36       = 36,
+    INVISIBILITY_UNK37       = 37,
 
-    TOTAL_INVISIBILITY_TYPES = 12
+    TOTAL_INVISIBILITY_TYPES = 38
 };
 
 enum ServerSideVisibilityType
@@ -1189,7 +1533,7 @@ enum AuraStateType
     AURA_STATE_ENRAGE                       = 17,           // C   |
     AURA_STATE_BLEEDING                     = 18,           //    T|
     AURA_STATE_UNKNOWN19                    = 19,           //     |
-    //AURA_STATE_UNKNOWN20                  = 20,           //  c  | only (45317 Suicide)
+    AURA_STATE_ALLOW_SPEC_CHANGE_BG         = 20,           //  c  |
     //AURA_STATE_UNKNOWN21                  = 21,           //     | not used
     AURA_STATE_UNKNOWN22                    = 22,           // C  t| varius spells (63884, 50240)
     AURA_STATE_HEALTH_ABOVE_75_PERCENT      = 23            // C   |
@@ -1199,7 +1543,7 @@ enum AuraStateType
     (1<<(AURA_STATE_CONFLAGRATE-1))|(1<<(AURA_STATE_DEADLY_POISON-1)))
 
 // Spell mechanics
-enum Mechanics
+enum Mechanics : uint32
 {
     MECHANIC_NONE             = 0,
     MECHANIC_CHARM            = 1,
@@ -1232,14 +1576,16 @@ enum Mechanics
     MECHANIC_DISCOVERY        = 28,
     MECHANIC_IMMUNE_SHIELD    = 29,                         // Divine (Blessing) Shield/Protection and Ice Block
     MECHANIC_SAPPED           = 30,
-    MECHANIC_ENRAGED          = 31
+    MECHANIC_ENRAGED          = 31,
+    MECHANIC_WOUNDED          = 32,
+    MAX_MECHANIC              = 33
 };
 
 // Used for spell 42292 Immune Movement Impairment and Loss of Control (0x49967ca6)
 #define IMMUNE_TO_MOVEMENT_IMPAIRMENT_AND_LOSS_CONTROL_MASK (\
     (1<<MECHANIC_CHARM)|(1<<MECHANIC_DISORIENTED)|(1<<MECHANIC_FEAR)| \
     (1<<MECHANIC_ROOT)|(1<<MECHANIC_SLEEP)|(1<<MECHANIC_SNARE)| \
-    (1<<MECHANIC_STUN)|(1<<MECHANIC_FREEZE)|(1<<MECHANIC_KNOCKOUT)| \
+    (1<<MECHANIC_STUN)|(1<<MECHANIC_FREEZE)|(1<<MECHANIC_SILENCE)|(1<<MECHANIC_DISARM)|(1<<MECHANIC_KNOCKOUT)| \
     (1<<MECHANIC_POLYMORPH)|(1<<MECHANIC_BANISH)|(1<<MECHANIC_SHACKLE)| \
     (1<<MECHANIC_TURN)|(1<<MECHANIC_HORROR)|(1<<MECHANIC_DAZE)| \
     (1<<MECHANIC_SAPPED))
@@ -1275,123 +1621,141 @@ enum SpellImmunity
     IMMUNITY_DAMAGE                = 3,                     // enum SpellSchoolMask
     IMMUNITY_DISPEL                = 4,                     // enum DispelType
     IMMUNITY_MECHANIC              = 5,                     // enum Mechanics
-    IMMUNITY_ID                    = 6
-};
+    IMMUNITY_ID                    = 6,
 
-#define MAX_SPELL_IMMUNITY           7
+    MAX_SPELL_IMMUNITY
+};
 
 // target enum name consist of:
 // TARGET_[OBJECT_TYPE]_[REFERENCE_TYPE(skipped for caster)]_[SELECTION_TYPE(skipped for default)]_[additional specifiers(friendly, BACK_LEFT, etc.]
 enum Targets
 {
-    TARGET_UNIT_CASTER                 = 1,
-    TARGET_UNIT_NEARBY_ENEMY           = 2,
-    TARGET_UNIT_NEARBY_PARTY           = 3,
-    TARGET_UNIT_NEARBY_ALLY            = 4,
-    TARGET_UNIT_PET                    = 5,
-    TARGET_UNIT_TARGET_ENEMY           = 6,
-    TARGET_UNIT_SRC_AREA_ENTRY         = 7,
-    TARGET_UNIT_DEST_AREA_ENTRY        = 8,
-    TARGET_DEST_HOME                   = 9,
-    TARGET_UNIT_SRC_AREA_UNK_11        = 11,
-    TARGET_UNIT_SRC_AREA_ENEMY         = 15,
-    TARGET_UNIT_DEST_AREA_ENEMY        = 16,
-    TARGET_DEST_DB                     = 17,
-    TARGET_DEST_CASTER                 = 18,
-    TARGET_UNIT_CASTER_AREA_PARTY      = 20,
-    TARGET_UNIT_TARGET_ALLY            = 21,
-    TARGET_SRC_CASTER                  = 22,
-    TARGET_GAMEOBJECT_TARGET           = 23,
-    TARGET_UNIT_CONE_ENEMY_24          = 24,
-    TARGET_UNIT_TARGET_ANY             = 25,
-    TARGET_GAMEOBJECT_ITEM_TARGET      = 26,
-    TARGET_UNIT_MASTER                 = 27,
-    TARGET_DEST_DYNOBJ_ENEMY           = 28,
-    TARGET_DEST_DYNOBJ_ALLY            = 29,
-    TARGET_UNIT_SRC_AREA_ALLY          = 30,
-    TARGET_UNIT_DEST_AREA_ALLY         = 31,
-    TARGET_DEST_CASTER_SUMMON          = 32, // front left, doesn't use radius
-    TARGET_UNIT_SRC_AREA_PARTY         = 33,
-    TARGET_UNIT_DEST_AREA_PARTY        = 34,
-    TARGET_UNIT_TARGET_PARTY           = 35,
-    TARGET_DEST_CASTER_UNK_36          = 36,
-    TARGET_UNIT_LASTTARGET_AREA_PARTY  = 37,
-    TARGET_UNIT_NEARBY_ENTRY           = 38,
-    TARGET_DEST_CASTER_FISHING         = 39,
-    TARGET_GAMEOBJECT_NEARBY_ENTRY     = 40,
-    TARGET_DEST_CASTER_FRONT_RIGHT     = 41,
-    TARGET_DEST_CASTER_BACK_RIGHT      = 42,
-    TARGET_DEST_CASTER_BACK_LEFT       = 43,
-    TARGET_DEST_CASTER_FRONT_LEFT      = 44,
-    TARGET_UNIT_TARGET_CHAINHEAL_ALLY  = 45,
-    TARGET_DEST_NEARBY_ENTRY           = 46,
-    TARGET_DEST_CASTER_FRONT           = 47,
-    TARGET_DEST_CASTER_BACK            = 48,
-    TARGET_DEST_CASTER_RIGHT           = 49,
-    TARGET_DEST_CASTER_LEFT            = 50,
-    TARGET_GAMEOBJECT_SRC_AREA         = 51,
-    TARGET_GAMEOBJECT_DEST_AREA        = 52,
-    TARGET_DEST_TARGET_ENEMY           = 53,
-    TARGET_UNIT_CONE_ENEMY_54          = 54,
-    TARGET_DEST_CASTER_FRONT_LEAP      = 55, // for a leap spell
-    TARGET_UNIT_CASTER_AREA_RAID       = 56,
-    TARGET_UNIT_TARGET_RAID            = 57,
-    TARGET_UNIT_NEARBY_RAID            = 58,
-    TARGET_UNIT_CONE_ALLY              = 59,
-    TARGET_UNIT_CONE_ENTRY             = 60,
-    TARGET_UNIT_TARGET_AREA_RAID_CLASS = 61,
-    TARGET_UNK_62                      = 62,
-    TARGET_DEST_TARGET_ANY             = 63,
-    TARGET_DEST_TARGET_FRONT           = 64,
-    TARGET_DEST_TARGET_BACK            = 65,
-    TARGET_DEST_TARGET_RIGHT           = 66,
-    TARGET_DEST_TARGET_LEFT            = 67,
-    TARGET_DEST_TARGET_FRONT_RIGHT     = 68,
-    TARGET_DEST_TARGET_BACK_RIGHT      = 69,
-    TARGET_DEST_TARGET_BACK_LEFT       = 70,
-    TARGET_DEST_TARGET_FRONT_LEFT      = 71,
-    TARGET_DEST_CASTER_RANDOM          = 72,
-    TARGET_DEST_CASTER_RADIUS          = 73,
-    TARGET_DEST_TARGET_RANDOM          = 74,
-    TARGET_DEST_TARGET_RADIUS          = 75,
-    TARGET_DEST_CHANNEL_TARGET         = 76,
-    TARGET_UNIT_CHANNEL_TARGET         = 77,
-    TARGET_DEST_DEST_FRONT             = 78,
-    TARGET_DEST_DEST_BACK              = 79,
-    TARGET_DEST_DEST_RIGHT             = 80,
-    TARGET_DEST_DEST_LEFT              = 81,
-    TARGET_DEST_DEST_FRONT_RIGHT       = 82,
-    TARGET_DEST_DEST_BACK_RIGHT        = 83,
-    TARGET_DEST_DEST_BACK_LEFT         = 84,
-    TARGET_DEST_DEST_FRONT_LEFT        = 85,
-    TARGET_DEST_DEST_RANDOM            = 86,
-    TARGET_DEST_DEST                   = 87,
-    TARGET_DEST_DYNOBJ_NONE            = 88,
-    TARGET_DEST_TRAJ                   = 89,
-    TARGET_UNIT_TARGET_MINIPET         = 90,
-    TARGET_DEST_DEST_RADIUS            = 91,
-    TARGET_UNIT_SUMMONER               = 92,
-    TARGET_CORPSE_SRC_AREA_ENEMY       = 93, // NYI
-    TARGET_UNIT_VEHICLE                = 94,
-    TARGET_UNIT_TARGET_PASSENGER       = 95,
-    TARGET_UNIT_PASSENGER_0            = 96,
-    TARGET_UNIT_PASSENGER_1            = 97,
-    TARGET_UNIT_PASSENGER_2            = 98,
-    TARGET_UNIT_PASSENGER_3            = 99,
-    TARGET_UNIT_PASSENGER_4            = 100,
-    TARGET_UNIT_PASSENGER_5            = 101,
-    TARGET_UNIT_PASSENGER_6            = 102,
-    TARGET_UNIT_PASSENGER_7            = 103,
-    TARGET_UNIT_CONE_ENEMY_104         = 104,
-    TARGET_UNIT_UNK_105                = 105, // 1 spell
-    TARGET_DEST_CHANNEL_CASTER         = 106,
-    TARGET_UNK_DEST_AREA_UNK_107       = 107, // not enough info - only generic spells avalible
-    TARGET_GAMEOBJECT_CONE             = 108,
-    TARGET_DEST_UNK_110                = 110, // 1 spell
+    TARGET_UNIT_CASTER                          = 1,
+    TARGET_UNIT_NEARBY_ENEMY                    = 2,
+    TARGET_UNIT_NEARBY_ALLY                     = 3,
+    TARGET_UNIT_NEARBY_PARTY                    = 4,
+    TARGET_UNIT_PET                             = 5,
+    TARGET_UNIT_TARGET_ENEMY                    = 6,
+    TARGET_UNIT_SRC_AREA_ENTRY                  = 7,
+    TARGET_UNIT_DEST_AREA_ENTRY                 = 8,
+    TARGET_DEST_HOME                            = 9,
+    TARGET_UNIT_SRC_AREA_UNK_11                 = 11,
+    TARGET_UNIT_SRC_AREA_ENEMY                  = 15,
+    TARGET_UNIT_DEST_AREA_ENEMY                 = 16,
+    TARGET_DEST_DB                              = 17,
+    TARGET_DEST_CASTER                          = 18,
+    TARGET_UNIT_CASTER_AREA_PARTY               = 20,
+    TARGET_UNIT_TARGET_ALLY                     = 21,
+    TARGET_SRC_CASTER                           = 22,
+    TARGET_GAMEOBJECT_TARGET                    = 23,
+    TARGET_UNIT_CONE_ENEMY_24                   = 24,
+    TARGET_UNIT_TARGET_ANY                      = 25,
+    TARGET_GAMEOBJECT_ITEM_TARGET               = 26,
+    TARGET_UNIT_MASTER                          = 27,
+    TARGET_DEST_DYNOBJ_ENEMY                    = 28,
+    TARGET_DEST_DYNOBJ_ALLY                     = 29,
+    TARGET_UNIT_SRC_AREA_ALLY                   = 30,
+    TARGET_UNIT_DEST_AREA_ALLY                  = 31,
+    TARGET_DEST_CASTER_SUMMON                   = 32, // front left, doesn't use radius
+    TARGET_UNIT_SRC_AREA_PARTY                  = 33,
+    TARGET_UNIT_DEST_AREA_PARTY                 = 34,
+    TARGET_UNIT_TARGET_PARTY                    = 35,
+    TARGET_DEST_CASTER_UNK_36                   = 36,
+    TARGET_UNIT_LASTTARGET_AREA_PARTY           = 37,
+    TARGET_UNIT_NEARBY_ENTRY                    = 38,
+    TARGET_DEST_CASTER_FISHING                  = 39,
+    TARGET_GAMEOBJECT_NEARBY_ENTRY              = 40,
+    TARGET_DEST_CASTER_FRONT_RIGHT              = 41,
+    TARGET_DEST_CASTER_BACK_RIGHT               = 42,
+    TARGET_DEST_CASTER_BACK_LEFT                = 43,
+    TARGET_DEST_CASTER_FRONT_LEFT               = 44,
+    TARGET_UNIT_TARGET_CHAINHEAL_ALLY           = 45,
+    TARGET_DEST_NEARBY_ENTRY                    = 46,
+    TARGET_DEST_CASTER_FRONT                    = 47,
+    TARGET_DEST_CASTER_BACK                     = 48,
+    TARGET_DEST_CASTER_RIGHT                    = 49,
+    TARGET_DEST_CASTER_LEFT                     = 50,
+    TARGET_GAMEOBJECT_SRC_AREA                  = 51,
+    TARGET_GAMEOBJECT_DEST_AREA                 = 52,
+    TARGET_DEST_TARGET_ENEMY                    = 53,
+    TARGET_UNIT_CONE_180_DEG_ENEMY              = 54, // Defaults to 180 if ConeDegrees is not set
+    TARGET_DEST_CASTER_FRONT_LEAP               = 55, // for a leap spell
+    TARGET_UNIT_CASTER_AREA_RAID                = 56,
+    TARGET_UNIT_TARGET_RAID                     = 57,
+    TARGET_UNIT_NEARBY_RAID                     = 58,
+    TARGET_UNIT_CONE_ALLY                       = 59,
+    TARGET_UNIT_CONE_ENTRY                      = 60,
+    TARGET_UNIT_TARGET_AREA_RAID_CLASS          = 61,
+    TARGET_DEST_CASTER_GROUND                   = 62,
+    TARGET_DEST_TARGET_ANY                      = 63,
+    TARGET_DEST_TARGET_FRONT                    = 64,
+    TARGET_DEST_TARGET_BACK                     = 65,
+    TARGET_DEST_TARGET_RIGHT                    = 66,
+    TARGET_DEST_TARGET_LEFT                     = 67,
+    TARGET_DEST_TARGET_FRONT_RIGHT              = 68,
+    TARGET_DEST_TARGET_BACK_RIGHT               = 69,
+    TARGET_DEST_TARGET_BACK_LEFT                = 70,
+    TARGET_DEST_TARGET_FRONT_LEFT               = 71,
+    TARGET_DEST_CASTER_RANDOM                   = 72,
+    TARGET_DEST_CASTER_RADIUS                   = 73,
+    TARGET_DEST_TARGET_RANDOM                   = 74,
+    TARGET_DEST_TARGET_RADIUS                   = 75,
+    TARGET_DEST_CHANNEL_TARGET                  = 76,
+    TARGET_UNIT_CHANNEL_TARGET                  = 77,
+    TARGET_DEST_DEST_FRONT                      = 78,
+    TARGET_DEST_DEST_BACK                       = 79,
+    TARGET_DEST_DEST_RIGHT                      = 80,
+    TARGET_DEST_DEST_LEFT                       = 81,
+    TARGET_DEST_DEST_FRONT_RIGHT                = 82,
+    TARGET_DEST_DEST_BACK_RIGHT                 = 83,
+    TARGET_DEST_DEST_BACK_LEFT                  = 84,
+    TARGET_DEST_DEST_FRONT_LEFT                 = 85,
+    TARGET_DEST_DEST_RANDOM                     = 86,
+    TARGET_DEST_DEST                            = 87,
+    TARGET_DEST_DYNOBJ_NONE                     = 88,
+    TARGET_DEST_TRAJ                            = 89,
+    TARGET_UNIT_TARGET_MINIPET                  = 90,
+    TARGET_DEST_DEST_RADIUS                     = 91,
+    TARGET_UNIT_SUMMONER                        = 92,
+    TARGET_CORPSE_SRC_AREA_ENEMY                = 93, // NYI
+    TARGET_UNIT_VEHICLE                         = 94,
+    TARGET_UNIT_TARGET_PASSENGER                = 95,
+    TARGET_UNIT_PASSENGER_0                     = 96,
+    TARGET_UNIT_PASSENGER_1                     = 97,
+    TARGET_UNIT_PASSENGER_2                     = 98,
+    TARGET_UNIT_PASSENGER_3                     = 99,
+    TARGET_UNIT_PASSENGER_4                     = 100,
+    TARGET_UNIT_PASSENGER_5                     = 101,
+    TARGET_UNIT_PASSENGER_6                     = 102,
+    TARGET_UNIT_PASSENGER_7                     = 103,
+    TARGET_UNIT_CONE_CASTER_TO_DEST_ENEMY       = 104,
+    TARGET_UNIT_CASTER_AND_PASSENGERS           = 105,
+    TARGET_DEST_CHANNEL_CASTER                  = 106,
+    TARGET_DEST_NEARBY_ENTRY_2                  = 107,
+    TARGET_GAMEOBJECT_CONE_CASTER_TO_DEST_ENEMY = 108,
+    TARGET_GAMEOBJECT_CONE_CASTER_TO_DEST_ALLY  = 109,
+    TARGET_UNIT_CONE_CASTER_TO_DEST_ENTRY       = 110, // 1 spell
+    TARGET_UNK_111                              = 111,
+    TARGET_DEST_TARGET_ANY_2                    = 112, // 1 Spell
+    TARGET_UNK_113                              = 113,
+    TARGET_UNK_114                              = 114,
+    TARGET_UNK_115                              = 115,
+    TARGET_UNK_116                              = 116,
+    TARGET_UNK_117                              = 117,
+    TARGET_UNIT_TARGET_ALLY_OR_RAID             = 118, // If target is in your party or raid, all party and raid members will be affected
+    TARGET_CORPSE_SRC_AREA_RAID                 = 119,
+    TARGET_UNIT_CASTER_AND_SUMMONS              = 120,
+    TARGET_CORPSE_TARGET_ALLY                   = 121,
+    TARGET_UNIT_AREA_THREAT_LIST                = 122,
+    TARGET_UNIT_AREA_TAP_LIST                   = 123,
+    TARGET_UNIT_TARGET_TAP_LIST                 = 124,
+    TARGET_DEST_CASTER_GROUND_2                 = 125, // 1 spell in 4.3.4
+    TARGET_UNIT_AREA_ENEMY                      = 126, // 1 spell in 4.3.4 (checked up until 8.3.0)
+    TARGET_UNK_127                              = 127,
     TOTAL_SPELL_TARGETS
 };
 
-enum SpellMissInfo
+enum SpellMissInfo : uint8
 {
     SPELL_MISS_NONE                    = 0,
     SPELL_MISS_MISS                    = 1,
@@ -1427,9 +1791,11 @@ enum SpellDmgClass
 
 enum SpellPreventionType
 {
-    SPELL_PREVENTION_TYPE_NONE      = 0,
-    SPELL_PREVENTION_TYPE_SILENCE   = 1,
-    SPELL_PREVENTION_TYPE_PACIFY    = 2
+    SPELL_PREVENTION_TYPE_NONE          = 0,
+    SPELL_PREVENTION_TYPE_SILENCE       = 1,
+    SPELL_PREVENTION_TYPE_PACIFY        = 2,
+    SPELL_PREVENTION_TYPE_UNK           = 3, // Only a few spells have this, but most of the should be interruptable.
+    SPELL_PREVENTION_TYPE_NO_ACTIONS    = 4
 };
 
 enum GameobjectTypes
@@ -1473,17 +1839,18 @@ enum GameobjectTypes
 };
 
 #define MAX_GAMEOBJECT_TYPE                  36             // sending to client this or greater value can crash client.
-#define MAX_GAMEOBJECT_DATA                  24             // Max number of uint32 vars in gameobject_template data field
+#define MAX_GAMEOBJECT_DATA                  32             // Max number of uint32 vars in gameobject_template data field
 
 enum GameObjectFlags
 {
     GO_FLAG_IN_USE          = 0x00000001,                   // disables interaction while animated
     GO_FLAG_LOCKED          = 0x00000002,                   // require key, spell, event, etc to be opened. Makes "Locked" appear in tooltip
-    GO_FLAG_INTERACT_COND   = 0x00000004,                   // cannot interact (condition to interact)
+    GO_FLAG_INTERACT_COND   = 0x00000004,                   // cannot interact (condition to interact - requires GO_DYNFLAG_LO_ACTIVATE to enable interaction clientside)
     GO_FLAG_TRANSPORT       = 0x00000008,                   // any kind of transport? Object can transport (elevator, boat, car)
     GO_FLAG_NOT_SELECTABLE  = 0x00000010,                   // not selectable even in GM mode
     GO_FLAG_NODESPAWN       = 0x00000020,                   // never despawn, typically for doors, they just change state
-    GO_FLAG_TRIGGERED       = 0x00000040,                   // typically, summoned objects. Triggered by spell or other events
+    GO_FLAG_AI_OBSTACLE     = 0x00000040,                   // makes the client register the object in something called AIObstacleMgr, unknown what it does
+    GO_FLAG_FREEZE_ANIMATION = 0x00000080,
     GO_FLAG_DAMAGED         = 0x00000200,
     GO_FLAG_DESTROYED       = 0x00000400
 };
@@ -1493,8 +1860,22 @@ enum GameObjectDynamicLowFlags
     GO_DYNFLAG_LO_ACTIVATE          = 0x01,                 // enables interaction with GO
     GO_DYNFLAG_LO_ANIMATE           = 0x02,                 // possibly more distinct animation of GO
     GO_DYNFLAG_LO_NO_INTERACT       = 0x04,                 // appears to disable interaction (not fully verified)
-    GO_DYNFLAG_LO_SPARKLE           = 0x08                  // makes GO sparkle
+    GO_DYNFLAG_LO_SPARKLE           = 0x08,                 // makes GO sparkle
+    GO_DYNFLAG_LO_STOPPED           = 0x10                  // Transport is stopped
 };
+
+// client side GO show states
+enum GOState : uint8
+{
+    GO_STATE_ACTIVE             = 0,                        // show in world as used and not reset (closed door open)
+    GO_STATE_READY              = 1,                        // show in world as ready (closed door close)
+    GO_STATE_ACTIVE_ALTERNATIVE = 2,                        // show in world as used in alt way and not reset (closed door open by cannon fire)
+    GO_STATE_TRANSPORT_ACTIVE   = 24,                       // transport exclusive: transport moves to first stop frame
+    GO_STATE_TRANSPORT_STOPPED  = 25                        // transport exclusive: transport is going to stop at provided stop frame
+};
+
+#define MAX_GO_STATE 3
+#define MAX_GO_STATE_TRANSPORT_STOP_FRAMES 9
 
 enum GameObjectDestructibleState
 {
@@ -1758,7 +2139,8 @@ enum TextEmotes
     TEXT_EMOTE_LOOK                 = 449,
     TEXT_EMOTE_OBJECT               = 450,
     TEXT_EMOTE_SWEAT                = 451,
-    TEXT_EMOTE_YW                   = 453
+    TEXT_EMOTE_YW                   = 453,
+    TEXT_EMOTE_READ                 = 456
 };
 
 // Emotes.dbc
@@ -1938,7 +2320,19 @@ enum Emote
     EMOTE_STATE_STRANGULATE             = 473,
     EMOTE_STATE_READY_SPELL_OMNI        = 474,
     EMOTE_STATE_HOLD_JOUST              = 475,
-    EMOTE_ONESHOT_CRY_JAINA             = 476
+    EMOTE_ONESHOT_CRY_JAINA             = 476,
+    EMOTE_ONESHOT_SPECIAL_UNARMED       = 477,
+    EMOTE_STATE_DANCE_NOSHEATHE         = 478,
+    EMOTE_ONESHOT_SNIFF                 = 479,
+    EMOTE_ONESHOT_DRAGONSTOMP           = 480,
+    EMOTE_ONESHOT_KNOCKDOWN             = 482,
+    EMOTE_STATE_READ                    = 483,
+    EMOTE_ONESHOT_FLYEMOTETALK          = 485,
+    EMOTE_STATE_READ_ALLOWMOVEMENT      = 492,
+    EMOTE_STATE_READY1H_ALLOW_MOVEMENT  = 505,
+    EMOTE_STATE_READY2H_ALLOW_MOVEMENT  = 506,
+    EMOTE_ONESHOT_OPEN                  = 517,
+    EMOTE_STATE_READ_CHRISTMAS          = 518
 };
 
 // AnimationData.dbc
@@ -2449,14 +2843,169 @@ enum Anim
     ANIM_CARRY2H                           = 502,
     ANIM_CARRIED2H                         = 503,
     ANIM_FLY_CARRY2H                       = 504,
-    ANIM_FLY_CARRIED2H                     = 505
+    ANIM_FLY_CARRIED2H                     = 505,
+    ANIM_EMOTE_SNIFF                       = 506,
+    ANIM_EMOTE_FLY_SNIFF                   = 507,
+    ANIM_ATTACK_FIST1H                     = 508,
+    ANIM_FLY_ATTACK_FIST1H                 = 509,
+    ANIM_ATTACK_FIST_1H_OFF                = 510,
+    ANIM_FLY_ATTACK_FIST_1H_OFF            = 511,
+    ANIM_PARRY_FIST1H                      = 512,
+    ANIM_FLY_PARRY_FIST1H                  = 513,
+    ANIM_READY_FIST1H                      = 514,
+    ANIM_FLY_READY_FIST1H                  = 515,
+    ANIM_SPECIAL_FIST1H                    = 516,
+    ANIM_FLY_SPECIAL_FIST1H                = 517,
+    ANIM_EMOTE_READ_START                  = 518,
+    ANIM_FLY_EMOTE_READ_START              = 519,
+    ANIM_EMOTE_READ_LOOP                   = 520,
+    ANIM_FLY_EMOTE_READ_LOOP               = 521,
+    ANIM_EMOTE_READ_END                    = 522,
+    ANIM_FLY_EMOTE_READ_END                = 523,
+    ANIM_SWIM_RUN                          = 524,
+    ANIM_FLY_SWIM_RUN                      = 525,
+    ANIM_SWIM_WALK                         = 526,
+    ANIM_FLY_SWIM_WALK                     = 527,
+    ANIM_SWIM_WALK_BACKWARDS               = 528,
+    ANIM_FLY_SWIM_WALK_BACKWARDS           = 529,
+    ANIM_SWIM_SPRINT                       = 530,
+    ANIM_FLY_SWIM_SPRINT                   = 531,
+    ANIM_MOUNT_SWIM_IDLE                   = 532,
+    ANIM_FLY_MOUNT_SWIM_IDLE               = 533,
+    ANIM_MOUNT_SWIM_BACKWARDS              = 534,
+    ANIM_FLY_MOUNT_SWIM_BACKWARDS          = 535,
+    ANIM_MOUNT_SWIM_LEFT                   = 536,
+    ANIM_FLY_MOUNT_SWIM_LEFT               = 537,
+    ANIM_MOUNT_SWIM_RIGHT                  = 538,
+    ANIM_FLY_MOUNT_SWIM_RIGHT              = 539,
+    ANIM_MOUNT_SWIM_RUN                    = 540,
+    ANIM_FLY_MOUNT_SWIM_RUN                = 541,
+    ANIM_MOUNT_SWIM_SPRINT                 = 542,
+    ANIM_FLY_MOUNT_SWIM_SPRINT             = 543,
+    ANIM_MOUNT_SWIM_WALK                   = 544,
+    ANIM_FLY_MOUNT_SWIM_WALK               = 545,
+    ANIM_MOUNT_SWIM_WALK_BACKWARDS         = 546,
+    ANIM_FLY_MOUNT_SWIM_WALK_BACKWARDS     = 547,
+    ANIM_MOUNT_FLIGHT_IDLE                 = 548,
+    ANIM_FLY_MOUNT_FLIGHT_IDLE             = 549,
+    ANIM_MOUNT_FLIGHT_BACKWARDS            = 550,
+    ANIM_FLY_MOUNT_FLIGHT_BACKWARDS        = 551,
+    ANIM_MOUNT_FLIGHT_LEFT                 = 552,
+    ANIM_FLY_MOUNT_FLIGHT_LEFT             = 553,
+    ANIM_MOUNT_FLIGHT_RIGHT                = 554,
+    ANIM_FLY_MOUNT_FLIGHT_RIGHT            = 555,
+    ANIM_MOUNT_FLIGHT_RUN                  = 556,
+    ANIM_FLY_MOUNT_FLIGHT_RUN              = 557,
+    ANIM_MOUNT_FLIGHT_SPRINT               = 558,
+    ANIM_FLY_MOUNT_FLIGHT_SPRINT           = 559,
+    ANIM_MOUNT_FLIGHT_WALK                 = 560,
+    ANIM_FLY_MOUNT_FLIGHT_WALK             = 561,
+    ANIM_MOUNT_FLIGHT_WALK_BACKWARDS       = 562,
+    ANIM_FLY_MOUNT_FLIGHT_WALK_BACKWARDS   = 563,
+    ANIM_MOUNT_FLIGHT_START                = 564,
+    ANIM_FLY_MOUNT_FLIGHT_START            = 565,
+    ANIM_MOUNT_SWIM_START                  = 566,
+    ANIM_FLY_MOUNT_SWIM_START              = 567,
+    ANIM_MOUNT_SWIM_LAND                   = 568,
+    ANIM_FLY_MOUNT_SWIM_LAND               = 569,
+    ANIM_MOUNT_SWIM_LAND_RUN               = 570,
+    ANIM_FLY_MOUNT_SWIM_LAND_RUN           = 571,
+    ANIM_MOUNT_FLIGHT_LAND                 = 572,
+    ANIM_FLY_MOUNT_FLIGHT_LAND             = 573,
+    ANIM_MOUNT_FLIGHT_LAND_RUN             = 574,
+    ANIM_FLY_MOUNT_FLIGHT_LAND_RUN         = 575,
+    ANIM_READY_BLOW_DART                   = 576,
+    ANIM_FLY_READY_BLOW_DART               = 577,
+    ANIM_LOAD_BLOW_DART                    = 578,
+    ANIM_FLY_LOAD_BLOW_DART                = 579,
+    ANIM_HOLD_BLOW_DART                    = 580,
+    ANIM_FLY_HOLD_BLOW_DART                = 581,
+    ANIM_ATTACK_BLOW_DART                  = 582,
+    ANIM_FLY_ATTACK_BLOW_DART              = 583,
+    ANIM_CARRIAGE_MOUNT                    = 584,
+    ANIM_FLY_CARRIAGE_MOUNT                = 585,
+    ANIM_CARRIAGE_PASSENGER_MOUNT          = 586,
+    ANIM_FLY_CARRIAGE_PASSENGER_MOUNT      = 587,
+    ANIM_CARRIAGE_MOUNT_ATTACK             = 588,
+    ANIM_FLY_CARRIAGE_MOUNT_ATTACK         = 589,
+    ANIM_BARTENDER_STAND                   = 590,
+    ANIM_FLY_BARTENDER_STAND               = 591,
+    ANIM_BARTENDER_WALK                    = 592,
+    ANIM_FLY_BARTENDER_WALK                = 593,
+    ANIM_BARTENDER_RUN                     = 594,
+    ANIM_FLY_BARTENDER_RUN                 = 595,
+    ANIM_BARTENDER_SHUFFLE_LEFT            = 596,
+    ANIM_FLY_BARTENDER_SHUFFLE_LEFT        = 597,
+    ANIM_BARTENDER_SHUFFLE_RIGHT           = 598,
+    ANIM_FLY_BARTENDER_SHUFFLE_RIGHT       = 599,
+    ANIM_BARTENDER_EMOTE_TALK              = 600,
+    ANIM_FLY_BARTENDER_EMOTE_TALK          = 601,
+    ANIM_BARTENDER_EMOTE_POINT             = 602,
+    ANIM_FLY_BARTENDER_EMOTE_POINT         = 603,
+    ANIM_BARMAID_STAND                     = 604,
+    ANIM_FLY_BARMAID_STAND                 = 605,
+    ANIM_BARMAID_WALK                      = 606,
+    ANIM_FLY_BARMAID_WALK                  = 607,
+    ANIM_BARMAID_RUN                       = 608,
+    ANIM_FLY_BARMAID_RUN                   = 609,
+    ANIM_BARMAID_SHUFFLE_LEFT              = 610,
+    ANIM_FLY_BARMAID_SHUFFLE_LEFT          = 611,
+    ANIM_BARMAID_SHUFFLE_RIGHT             = 612,
+    ANIM_FLY_BARMAID_SHUFFLE_RIGHT         = 613,
+    ANIM_BARMAID_EMOTE_TALK                = 614,
+    ANIM_FLY_BARMAID_EMOTE_TALK            = 615,
+    ANIM_BARMAID_EMOTE_POINT               = 616,
+    ANIM_FLY_BARMAID_EMOTE_POINT           = 617,
+    ANIM_MOUNT_SELF_IDLE                   = 618,
+    ANIM_FLY_MOUNT_SELF_IDLE               = 619,
+    ANIM_MOUNT_SELF_WALK                   = 620,
+    ANIM_FLY_MOUNT_SELF_WALK               = 621,
+    ANIM_MOUNT_SELF_RUN                    = 622,
+    ANIM_FLY_MOUNT_SELF_RUN                = 623,
+    ANIM_MOUNT_SELF_SPRINT                 = 624,
+    ANIM_FLY_MOUNT_SELF_SPRINT             = 625,
+    ANIM_MOUNT_SELF_RUN_LEFT               = 626,
+    ANIM_FLY_MOUNT_SELF_RUN_LEFT           = 627,
+    ANIM_MOUNT_SELF_RUN_RIGHT              = 628,
+    ANIM_FLY_MOUNT_SELF_RUN_RIGHT          = 629,
+    ANIM_MOUNT_SELF_SHUFFLE_LEFT           = 630,
+    ANIM_FLY_MOUNT_SELF_SHUFFLE_LEFT       = 631,
+    ANIM_MOUNT_SELF_SHUFFLE_RIGHT          = 632,
+    ANIM_FLY_MOUNT_SELF_SHUFFLE_RIGHT      = 633,
+    ANIM_MOUNT_SELF_WALK_BACKWARDS         = 634,
+    ANIM_FLY_MOUNT_SELF_WALK_BACKWARDS     = 635,
+    ANIM_MOUNT_SELF_SPECIAL                = 636,
+    ANIM_FLY_MOUNT_SELF_SPECIAL            = 637,
+    ANIM_MOUNT_SELF_JUMP                   = 638,
+    ANIM_FLY_MOUNT_SELF_JUMP               = 639,
+    ANIM_MOUNT_SELF_JUMP_START             = 640,
+    ANIM_FLY_MOUNT_SELF_JUMP_START         = 641,
+    ANIM_MOUNT_SELF_JUMP_END               = 642,
+    ANIM_FLY_MOUNT_SELF_JUMP_END           = 643,
+    ANIM_MOUNT_SELF_JUMP_LAND_RUN          = 644,
+    ANIM_FLY_MOUNT_SELF_JUMP_LAND_RUN      = 645,
+    ANIM_MOUNT_SELF_START                  = 646,
+    ANIM_FLY_MOUNT_SELF_START              = 647,
+    ANIM_MOUNT_SELF_FALL                   = 648,
+    ANIM_FLY_MOUNT_SELF_FALL               = 649,
+    ANIM_STORMSTRIKE                       = 650,
+    ANIM_FLY_STORMSTRIKE                   = 651,
+    ANIM_READY_JOUST_NO_SHEATHE            = 652,
+    ANIM_FLY_READY_JOUST_NO_SHEATHE        = 653,
+    ANIM_SLAM                              = 654,
+    ANIM_FLY_SLAM                          = 655,
+    ANIM_DEATH_STRIKE                      = 656,
+    ANIM_FLY_DEATH_STRIKE                  = 657,
+    ANIM_SWIM_ATTACK_UNARMED               = 658,
+    ANIM_FLY_SWIM_ATTACK_UNARMED           = 659
 };
 
 enum LockKeyType
 {
     LOCK_KEY_NONE  = 0,
     LOCK_KEY_ITEM  = 1,
-    LOCK_KEY_SKILL = 2
+    LOCK_KEY_SKILL = 2,
+    LOCK_KEY_SPELL = 3
 };
 
 enum LockType
@@ -2481,18 +3030,15 @@ enum LockType
     LOCKTYPE_SLOW_CLOSE            = 18,
     LOCKTYPE_FISHING               = 19,
     LOCKTYPE_INSCRIPTION           = 20,
-    LOCKTYPE_OPEN_FROM_VEHICLE     = 21
+    LOCKTYPE_OPEN_FROM_VEHICLE     = 21,
+    LOCKTYPE_ARCHAEOLOGY           = 22,
 };
 
-enum TrainerType                                            // this is important type for npcs!
+// this is important type for npcs!
+enum TrainerType
 {
     TRAINER_TYPE_CLASS             = 0,
-    TRAINER_TYPE_MOUNTS            = 1,                     // on blizz it's 2
-    TRAINER_TYPE_TRADESKILLS       = 2,
-    TRAINER_TYPE_PETS              = 3
 };
-
-#define MAX_TRAINER_TYPE 4
 
 // CreatureType.dbc
 enum CreatureType
@@ -2519,6 +3065,7 @@ uint32 const CREATURE_TYPEMASK_MECHANICAL_OR_ELEMENTAL = (1 << (CREATURE_TYPE_ME
 // CreatureFamily.dbc
 enum CreatureFamily
 {
+    CREATURE_FAMILY_NONE                = 0,
     CREATURE_FAMILY_WOLF                = 1,
     CREATURE_FAMILY_CAT                 = 2,
     CREATURE_FAMILY_SPIDER              = 3,
@@ -2559,43 +3106,66 @@ enum CreatureFamily
     CREATURE_FAMILY_RHINO               = 43,
     CREATURE_FAMILY_WASP                = 44,
     CREATURE_FAMILY_CORE_HOUND          = 45,
-    CREATURE_FAMILY_SPIRIT_BEAST        = 46
+    CREATURE_FAMILY_SPIRIT_BEAST        = 46,
+    CREATURE_FAMILY_WATER_ELEMENTAL     = 49,
+    CREATURE_FAMILY_FOX                 = 50,
+    CREATURE_FAMILY_MONKEY              = 51,
+    CREATURE_FAMILY_DOG                 = 52,
+    CREATURE_FAMILY_BEETLE              = 53,
+    CREATURE_FAMILY_SHALE_SPIDER        = 55,
+    CREATURE_FAMILY_ZOMBIE              = 56,
+    CREATURE_FAMILY_BEETLE_OLD          = 57,
+    CREATURE_FAMILY_SILITHID_2          = 59,
+    CREATURE_FAMILY_WASP_2              = 66,
+    CREATURE_FAMILY_HYDRA               = 68,
 };
 
 enum CreatureTypeFlags
 {
-    CREATURE_TYPEFLAGS_TAMEABLE         = 0x00000001,         // Tameable by any hunter
-    CREATURE_TYPEFLAGS_GHOST            = 0x00000002,         // Creature are also visible for not alive player. Allow gossip interaction if npcflag allow?
-    CREATURE_TYPEFLAGS_BOSS             = 0x00000004,
-    CREATURE_TYPEFLAGS_UNK3             = 0x00000008,
-    CREATURE_TYPEFLAGS_UNK4             = 0x00000010,
-    CREATURE_TYPEFLAGS_UNK5             = 0x00000020,
-    CREATURE_TYPEFLAGS_UNK6             = 0x00000040,
-    CREATURE_TYPEFLAGS_DEAD_INTERACT    = 0x00000080,         // Player can interact with the creature if its dead (not player dead)
-    CREATURE_TYPEFLAGS_HERBLOOT         = 0x00000100,         // Can be looted by herbalist
-    CREATURE_TYPEFLAGS_MININGLOOT       = 0x00000200,         // Can be looted by miner
-    CREATURE_TYPEFLAGS_UNK10            = 0x00000400,
-    CREATURE_TYPEFLAGS_MOUNTED_COMBAT   = 0x00000800,         // Creature can remain mounted when entering combat
-    CREATURE_TYPEFLAGS_AID_PLAYERS      = 0x00001000,         // ? Can aid any player in combat if in range?
-    CREATURE_TYPEFLAGS_UNK13            = 0x00002000,
-    CREATURE_TYPEFLAGS_UNK14            = 0x00004000,         // ? Possibly not in use
-    CREATURE_TYPEFLAGS_ENGINEERLOOT     = 0x00008000,         // Can be looted by engineer
-    CREATURE_TYPEFLAGS_EXOTIC           = 0x00010000,         // Can be tamed by hunter as exotic pet
-    CREATURE_TYPEFLAGS_UNK17            = 0x00020000,         // ? Related to vehicles/pvp?
-    CREATURE_TYPEFLAGS_UNK18            = 0x00040000,         // ? Related to vehicle/siege weapons?
-    CREATURE_TYPEFLAGS_UNK19            = 0x00080000,
-    CREATURE_TYPEFLAGS_UNK20            = 0x00100000,
-    CREATURE_TYPEFLAGS_UNK21            = 0x00200000,
-    CREATURE_TYPEFLAGS_UNK22            = 0x00400000,
-    CREATURE_TYPEFLAGS_UNK23            = 0x00800000,         // ? First seen in 3.2.2. Related to banner/backpack of creature/companion?
-    CREATURE_TYPEFLAGS_UNK24            = 0x01000000,
-    CREATURE_TYPEFLAGS_UNK25            = 0x02000000,
-    CREATURE_TYPEFLAGS_PARTY_MEMBER     = 0x04000000,         //! Creature can be targeted by spells that require target to be in caster's party/raid
-    CREATURE_TYPEFLAGS_UNK27            = 0x08000000,
-    CREATURE_TYPEFLAGS_UNK28            = 0x10000000,
-    CREATURE_TYPEFLAGS_UNK29            = 0x20000000,
-    CREATURE_TYPEFLAGS_UNK30            = 0x40000000,
-    CREATURE_TYPEFLAGS_UNK31            = 0x80000000
+    CREATURE_TYPE_FLAG_TAMEABLE_PET                         = 0x00000001,   // Makes the mob tameable (must also be a beast and have family set)
+    CREATURE_TYPE_FLAG_GHOST_VISIBLE                        = 0x00000002,   // Creature are also visible for not alive player. Allow gossip interaction if npcflag allow?
+    CREATURE_TYPE_FLAG_BOSS_MOB                             = 0x00000004,   // Changes creature's visible level to "??" in the creature's portrait - Immune Knockback.
+    CREATURE_TYPE_FLAG_DO_NOT_PLAY_WOUND_PARRY_ANIMATION    = 0x00000008,
+    CREATURE_TYPE_FLAG_HIDE_FACTION_TOOLTIP                 = 0x00000010,
+    CREATURE_TYPEFLAGS_UNK5                                 = 0x00000020,   // Sound related
+    CREATURE_TYPE_FLAG_SPELL_ATTACKABLE                     = 0x00000040,
+    CREATURE_TYPE_FLAG_CAN_INTERACT_WHILE_DEAD              = 0x00000080,   // Player can interact with the creature if its dead (not player dead)
+    CREATURE_TYPE_FLAG_HERB_SKINNING_SKILL                  = 0x00000100,   // Can be looted by herbalist
+    CREATURE_TYPE_FLAG_MINING_SKINNING_SKILL                = 0x00000200,   // Can be looted by miner
+    CREATURE_TYPE_FLAG_DO_NOT_LOG_DEATH                     = 0x00000400,   // Death event will not show up in combat log
+    CREATURE_TYPE_FLAG_MOUNTED_COMBAT_ALLOWED               = 0x00000800,   // Creature can remain mounted when entering combat
+    CREATURE_TYPE_FLAG_CAN_ASSIST                           = 0x00001000,   // ? Can aid any player in combat if in range?
+    CREATURE_TYPE_FLAG_IS_PET_BAR_USED                      = 0x00002000,
+    CREATURE_TYPE_FLAG_MASK_UID                             = 0x00004000,
+    CREATURE_TYPE_FLAG_ENGINEERING_SKINNING_SKILL           = 0x00008000,   // Can be looted by engineer
+    CREATURE_TYPE_FLAG_EXOTIC_PET                           = 0x00010000,   // Can be tamed by hunter as exotic pet
+    CREATURE_TYPE_FLAG_USE_DEFAULT_COLLISION_BOX            = 0x00020000,   // Collision related. (always using default collision box?)
+    CREATURE_TYPE_FLAG_IS_SIEGE_WEAPON                      = 0x00040000,
+    CREATURE_TYPE_FLAG_CAN_COLLIDE_WITH_MISSILES            = 0x00080000,   // Projectiles can collide with this creature - interacts with TARGET_DEST_TRAJ
+    CREATURE_TYPE_FLAG_HIDE_NAME_PLATE                      = 0x00100000,
+    CREATURE_TYPE_FLAG_DO_NOT_PLAY_MOUNTED_ANIMATIONS       = 0x00200000,
+    CREATURE_TYPE_FLAG_IS_LINK_ALL                          = 0x00400000,
+    CREATURE_TYPE_FLAG_INTERACT_ONLY_WITH_CREATOR           = 0x00800000,
+    CREATURE_TYPE_FLAG_DO_NOT_PLAY_UNIT_EVENT_SOUNDS        = 0x01000000,
+    CREATURE_TYPE_FLAG_HAS_NO_SHADOW_BLOB                   = 0x02000000,
+    CREATURE_TYPE_FLAG_TREAT_AS_RAID_UNIT                   = 0x04000000,   //! Creature can be targeted by spells that require target to be in caster's party/raid
+    CREATURE_TYPE_FLAG_FORCE_GOSSIP                         = 0x08000000,   // Allows the creature to display a single gossip option.
+    CREATURE_TYPE_FLAG_DO_NOT_SHEATHE                       = 0x10000000,
+    CREATURE_TYPE_FLAG_DO_NOT_TARGET_ON_INTERACTION         = 0x20000000,
+    CREATURE_TYPE_FLAG_DO_NOT_RENDER_OBJECT_NAME            = 0x40000000,
+    CREATURE_TYPE_FLAG_UNIT_IS_QUEST_BOSS                   = 0x80000000    // Not verified
+};
+
+enum CreatureTypeFlags2
+{
+    CREATURE_TYPEFLAGS_2_UNK1           = 0x00000001,
+    CREATURE_TYPEFLAGS_2_UNK2           = 0x00000002,
+    CREATURE_TYPEFLAGS_2_UNK3           = 0x00000004,
+    CREATURE_TYPEFLAGS_2_UNK4           = 0x00000008,
+    CREATURE_TYPEFLAGS_2_UNK5           = 0x00000010,
+    CREATURE_TYPEFLAGS_2_UNK6           = 0x00000020,
+    CREATURE_TYPEFLAGS_2_UNK7           = 0x00000040,
+    CREATURE_TYPEFLAGS_2_UNK8           = 0x00000080
 };
 
 enum CreatureEliteType
@@ -2609,7 +3179,7 @@ enum CreatureEliteType
 };
 
 // values based at Holidays.dbc
-enum HolidayIds
+enum HolidayIds : uint32
 {
     HOLIDAY_NONE                     = 0,
 
@@ -2638,7 +3208,14 @@ enum HolidayIds
     HOLIDAY_DAY_OF_DEAD              = 409,
     HOLIDAY_CALL_TO_ARMS_IC          = 420,
     HOLIDAY_LOVE_IS_IN_THE_AIR       = 423,
-    HOLIDAY_KALU_AK_FISHING_DERBY    = 424
+    HOLIDAY_KALU_AK_FISHING_DERBY    = 424,
+    HOLIDAY_CALL_TO_ARMS_BFG         = 435,
+    HOLIDAY_CALL_TO_ARMS_TP          = 436,
+    HOLIDAY_RATED_BG_15_VS_15        = 442,
+    HOLIDAY_RATED_BG_25_VS_25        = 443,
+    HOLIDAY_ANNIVERSARY_7_YEARS      = 467,
+    HOLIDAY_DARKMOON_FAIRE_TEROKKAR  = 479,
+    HOLIDAY_ANNIVERSARY_8_YEARS      = 484
 };
 
 // values based at QuestInfo.dbc
@@ -2700,7 +3277,12 @@ enum QuestSort
     QUEST_SORT_JEWELCRAFTING       = 373,
     QUEST_SORT_NOBLEGARDEN         = 374,
     QUEST_SORT_PILGRIMS_BOUNTY     = 375,
-    QUEST_SORT_LOVE_IS_IN_THE_AIR  = 376
+    QUEST_SORT_LOVE_IS_IN_THE_AIR  = 376,
+    QUEST_SORT_ARCHAEOLOGY         = 377,
+    QUEST_SORT_CHILDRENS_WEEK      = 378,
+    QUEST_SORT_FIRELANDS_INVASION  = 379,
+    QUEST_SORT_ZANDALARI           = 380,
+    QUEST_SORT_ELEMENTAL_BONDS     = 381
 };
 
 inline uint8 ClassByQuestSort(int32 QuestSort)
@@ -2846,7 +3428,7 @@ enum SkillType
     SKILL_RACIAL_HUMAN             = 754,
     SKILL_JEWELCRAFTING            = 755,
     SKILL_RACIAL_BLOODELF          = 756,
-    SKILL_PET_EVENT_RC             = 758,
+    SKILL_PET_EVENT_RC             = 758,   // SkillCategory = -1
     SKILL_LANG_DRAENEI             = 759,
     SKILL_RACIAL_DRAENEI           = 760,
     SKILL_PET_FELGUARD             = 761,
@@ -2874,10 +3456,34 @@ enum SkillType
     SKILL_PET_WASP                 = 785,
     SKILL_PET_EXOTIC_RHINO         = 786,
     SKILL_PET_EXOTIC_CORE_HOUND    = 787,
-    SKILL_PET_EXOTIC_SPIRIT_BEAST  = 788
+    SKILL_PET_EXOTIC_SPIRIT_BEAST  = 788,
+    SKILL_RACIAL_WORGEN            = 789,
+    SKILL_RACIAL_GOBLIN            = 790,
+    SKILL_LANG_WORGEN              = 791,
+    SKILL_LANG_GOBLIN              = 792,
+    SKILL_ARCHAEOLOGY              = 794,
+    SKILL_GENERAL_HUNTER           = 795,
+    SKILL_GENERAL_DEATH_KNIGHT     = 796,
+    SKILL_GENERAL_ROGUE            = 797,
+    SKILL_GENERAL_DRUID            = 798,
+    SKILL_GENERAL_MAGE             = 799,
+    SKILL_GENERAL_PALADIN          = 800,
+    SKILL_GENERAL_SHAMAN           = 801,
+    SKILL_GENERAL_WARLOCK          = 802,
+    SKILL_GENERAL_WARRIOR          = 803,
+    SKILL_GENERAL_PRIEST           = 804,
+    SKILL_PET_WATER_ELEMENTAL      = 805,
+    SKILL_PET_FOX                  = 808,
+    SKILL_ALL_GLYPHS               = 810,
+    SKILL_PET_DOG                  = 811,
+    SKILL_PET_MONKEY               = 815,
+    SKILL_PET_SHALE_SPIDER         = 817,
+    SKILL_PET_BEETLE               = 818,
+    SKILL_ALL_GUILD_PERKS          = 821,
+    SKILL_PET_HYDRA                = 824
 };
 
-#define MAX_SKILL_TYPE               789
+#define MAX_SKILL_TYPE               825
 
 inline SkillType SkillByLockType(LockType locktype)
 {
@@ -2888,6 +3494,7 @@ inline SkillType SkillByLockType(LockType locktype)
         case LOCKTYPE_MINING:      return SKILL_MINING;
         case LOCKTYPE_FISHING:     return SKILL_FISHING;
         case LOCKTYPE_INSCRIPTION: return SKILL_INSCRIPTION;
+        case LOCKTYPE_ARCHAEOLOGY: return SKILL_ARCHAEOLOGY;
         default: break;
     }
     return SKILL_NONE;
@@ -2908,12 +3515,14 @@ inline uint32 SkillByQuestSort(int32 QuestSort)
         case QUEST_SORT_FIRST_AID:      return SKILL_FIRST_AID;
         case QUEST_SORT_JEWELCRAFTING:  return SKILL_JEWELCRAFTING;
         case QUEST_SORT_INSCRIPTION:    return SKILL_INSCRIPTION;
+        case QUEST_SORT_ARCHAEOLOGY:    return SKILL_ARCHAEOLOGY;
     }
     return 0;
 }
 
 enum SkillCategory
 {
+    SKILL_CATEGORY_UNK1          = 0,
     SKILL_CATEGORY_ATTRIBUTES    = 5,
     SKILL_CATEGORY_WEAPON        = 6,
     SKILL_CATEGORY_CLASS         = 7,
@@ -2957,7 +3566,9 @@ enum TotemCategory
     TC_BLADED_PICKAXE              = 168,
     TC_FLINT_AND_TINDER            = 169,
     TC_RUNED_COBALT_ROD            = 189,
-    TC_RUNED_TITANIUM_ROD          = 190
+    TC_RUNED_TITANIUM_ROD          = 190,
+    TC_RUNED_ELEMENTIUM_ROD        = 209,
+    TC_HIGH_POWERED_BOLT_GUN       = 210,
 };
 
 enum UnitDynFlags
@@ -2992,62 +3603,75 @@ enum WeatherType
 
 enum ChatMsg
 {
-    CHAT_MSG_ADDON                  = 0xFFFFFFFF, // -1
-    CHAT_MSG_SYSTEM                 = 0x00,
-    CHAT_MSG_SAY                    = 0x01,
-    CHAT_MSG_PARTY                  = 0x02,
-    CHAT_MSG_RAID                   = 0x03,
-    CHAT_MSG_GUILD                  = 0x04,
-    CHAT_MSG_OFFICER                = 0x05,
-    CHAT_MSG_YELL                   = 0x06,
-    CHAT_MSG_WHISPER                = 0x07,
-    CHAT_MSG_WHISPER_FOREIGN        = 0x08,
-    CHAT_MSG_WHISPER_INFORM         = 0x09,
-    CHAT_MSG_EMOTE                  = 0x0A,
-    CHAT_MSG_TEXT_EMOTE             = 0x0B,
-    CHAT_MSG_MONSTER_SAY            = 0x0C,
-    CHAT_MSG_MONSTER_PARTY          = 0x0D,
-    CHAT_MSG_MONSTER_YELL           = 0x0E,
-    CHAT_MSG_MONSTER_WHISPER        = 0x0F,
-    CHAT_MSG_MONSTER_EMOTE          = 0x10,
-    CHAT_MSG_CHANNEL                = 0x11,
-    CHAT_MSG_CHANNEL_JOIN           = 0x12,
-    CHAT_MSG_CHANNEL_LEAVE          = 0x13,
-    CHAT_MSG_CHANNEL_LIST           = 0x14,
-    CHAT_MSG_CHANNEL_NOTICE         = 0x15,
-    CHAT_MSG_CHANNEL_NOTICE_USER    = 0x16,
-    CHAT_MSG_AFK                    = 0x17,
-    CHAT_MSG_DND                    = 0x18,
-    CHAT_MSG_IGNORED                = 0x19,
-    CHAT_MSG_SKILL                  = 0x1A,
-    CHAT_MSG_LOOT                   = 0x1B,
-    CHAT_MSG_MONEY                  = 0x1C,
-    CHAT_MSG_OPENING                = 0x1D,
-    CHAT_MSG_TRADESKILLS            = 0x1E,
-    CHAT_MSG_PET_INFO               = 0x1F,
-    CHAT_MSG_COMBAT_MISC_INFO       = 0x20,
-    CHAT_MSG_COMBAT_XP_GAIN         = 0x21,
-    CHAT_MSG_COMBAT_HONOR_GAIN      = 0x22,
-    CHAT_MSG_COMBAT_FACTION_CHANGE  = 0x23,
-    CHAT_MSG_BG_SYSTEM_NEUTRAL      = 0x24,
-    CHAT_MSG_BG_SYSTEM_ALLIANCE     = 0x25,
-    CHAT_MSG_BG_SYSTEM_HORDE        = 0x26,
-    CHAT_MSG_RAID_LEADER            = 0x27,
-    CHAT_MSG_RAID_WARNING           = 0x28,
-    CHAT_MSG_RAID_BOSS_EMOTE        = 0x29,
-    CHAT_MSG_RAID_BOSS_WHISPER      = 0x2A,
-    CHAT_MSG_FILTERED               = 0x2B,
-    CHAT_MSG_BATTLEGROUND           = 0x2C,
-    CHAT_MSG_BATTLEGROUND_LEADER    = 0x2D,
-    CHAT_MSG_RESTRICTED             = 0x2E,
-    CHAT_MSG_BATTLENET              = 0x2F,
-    CHAT_MSG_ACHIEVEMENT            = 0x30,
-    CHAT_MSG_GUILD_ACHIEVEMENT      = 0x31,
-    CHAT_MSG_ARENA_POINTS           = 0x32,
-    CHAT_MSG_PARTY_LEADER           = 0x33
+    CHAT_MSG_ADDON                              = 0xFFFFFFFF, // -1
+    CHAT_MSG_SYSTEM                             = 0x00,
+    CHAT_MSG_SAY                                = 0x01,
+    CHAT_MSG_PARTY                              = 0x02,
+    CHAT_MSG_RAID                               = 0x03,
+    CHAT_MSG_GUILD                              = 0x04,
+    CHAT_MSG_OFFICER                            = 0x05,
+    CHAT_MSG_YELL                               = 0x06,
+    CHAT_MSG_WHISPER                            = 0x07,
+    CHAT_MSG_WHISPER_FOREIGN                    = 0x08,
+    CHAT_MSG_WHISPER_INFORM                     = 0x09,
+    CHAT_MSG_EMOTE                              = 0x0A,
+    CHAT_MSG_TEXT_EMOTE                         = 0x0B,
+    CHAT_MSG_MONSTER_SAY                        = 0x0C,
+    CHAT_MSG_MONSTER_PARTY                      = 0x0D,
+    CHAT_MSG_MONSTER_YELL                       = 0x0E,
+    CHAT_MSG_MONSTER_WHISPER                    = 0x0F,
+    CHAT_MSG_MONSTER_EMOTE                      = 0x10,
+    CHAT_MSG_CHANNEL                            = 0x11,
+    CHAT_MSG_CHANNEL_JOIN                       = 0x12,
+    CHAT_MSG_CHANNEL_LEAVE                      = 0x13,
+    CHAT_MSG_CHANNEL_LIST                       = 0x14,
+    CHAT_MSG_CHANNEL_NOTICE                     = 0x15,
+    CHAT_MSG_CHANNEL_NOTICE_USER                = 0x16,
+    CHAT_MSG_AFK                                = 0x17,
+    CHAT_MSG_DND                                = 0x18,
+    CHAT_MSG_IGNORED                            = 0x19,
+    CHAT_MSG_SKILL                              = 0x1A,
+    CHAT_MSG_LOOT                               = 0x1B,
+    CHAT_MSG_MONEY                              = 0x1C,
+    CHAT_MSG_OPENING                            = 0x1D,
+    CHAT_MSG_TRADESKILLS                        = 0x1E,
+    CHAT_MSG_PET_INFO                           = 0x1F,
+    CHAT_MSG_COMBAT_MISC_INFO                   = 0x20,
+    CHAT_MSG_COMBAT_XP_GAIN                     = 0x21,
+    CHAT_MSG_COMBAT_HONOR_GAIN                  = 0x22,
+    CHAT_MSG_COMBAT_FACTION_CHANGE              = 0x23,
+    CHAT_MSG_BG_SYSTEM_NEUTRAL                  = 0x24,
+    CHAT_MSG_BG_SYSTEM_ALLIANCE                 = 0x25,
+    CHAT_MSG_BG_SYSTEM_HORDE                    = 0x26,
+    CHAT_MSG_RAID_LEADER                        = 0x27,
+    CHAT_MSG_RAID_WARNING                       = 0x28,
+    CHAT_MSG_RAID_BOSS_EMOTE                    = 0x29,
+    CHAT_MSG_RAID_BOSS_WHISPER                  = 0x2A,
+    CHAT_MSG_FILTERED                           = 0x2B,
+    CHAT_MSG_BATTLEGROUND                       = 0x2C,
+    CHAT_MSG_BATTLEGROUND_LEADER                = 0x2D,
+    CHAT_MSG_RESTRICTED                         = 0x2E,
+    CHAT_MSG_BATTLENET                          = 0x2F,
+    CHAT_MSG_ACHIEVEMENT                        = 0x30,
+    CHAT_MSG_GUILD_ACHIEVEMENT                  = 0x31,
+    CHAT_MSG_ARENA_POINTS                       = 0x32,
+    CHAT_MSG_PARTY_LEADER                       = 0x33,
+    CHAT_MSG_TARGETICONS                        = 0x34,
+    CHAT_MSG_BN_WHISPER                         = 0x35,
+    CHAT_MSG_BN_WHISPER_INFORM                  = 0x36,
+    CHAT_MSG_BN_CONVERSATION                    = 0x37,
+    CHAT_MSG_BN_CONVERSATION_NOTICE             = 0x38,
+    CHAT_MSG_BN_CONVERSATION_LIST               = 0x39,
+    CHAT_MSG_BN_INLINE_TOAST_ALERT              = 0x3A,
+    CHAT_MSG_BN_INLINE_TOAST_BROADCAST          = 0x3B,
+    CHAT_MSG_BN_INLINE_TOAST_BROADCAST_INFORM   = 0x3C,
+    CHAT_MSG_BN_INLINE_TOAST_CONVERSATION       = 0x3D,
+    CHAT_MSG_BN_WHISPER_PLAYER_OFFLINE          = 0x3E,
+    CHAT_MSG_COMBAT_GUILD_XP_GAIN               = 0x3F,
+    CHAT_MSG_CURRENCY                           = 0x40
 };
 
-#define MAX_CHAT_MSG_TYPE 0x34
+#define MAX_CHAT_MSG_TYPE 0x41
 
 enum ChatLinkColors
 {
@@ -3074,12 +3698,31 @@ enum PetDiet
 
 #define MAX_PET_DIET 9
 
+enum PetTameFailureReason
+{
+    PET_TAME_FAILURE_UNKNOWN                = 0,
+    PET_TAME_FAILURE_CREATURE_NOT_FOUND     = 1,
+    PET_TAME_FAILURE_TOO_MANY_PETS          = 2,
+    PET_TAME_FAILURE_CREATURE_CONTROLLED    = 3,
+    PET_TAME_FAILURE_NOT_TAMEABLE           = 4,
+    PET_TAME_FAILURE_ACTIVE_SUMMON          = 5,
+    PET_TAME_FAILURE_CANNOT_TAME_CREATURES  = 6,
+    PET_TAME_FAILURE_NO_PET_TO_SUMMON       = 7,
+    PET_TAME_FAILURE_INTERNAL_PET_ERROR     = 8,
+    PET_TAME_FAILURE_TOO_HIGH_LEVEL         = 9,
+    PET_TAME_FAILURE_DEAD_PET               = 10,
+    PET_TAME_FAILURE_PET_NOT_DEAD           = 11,
+    PET_TAME_FAILURE_CANNOT_TAME_EXOTIC     = 12,
+    PET_TAME_FAILURE_SLOT_LOCKED            = 13
+};
+
 #define CHAIN_SPELL_JUMP_RADIUS 8
 
 enum GuildLogs
 {
     GUILD_BANKLOG_MAX_RECORDS   = 25,
     GUILD_EVENTLOG_MAX_RECORDS  = 100,
+    GUILD_NEWSLOG_MAX_RECORDS   = 250
 };
 
 enum AiReaction
@@ -3100,7 +3743,7 @@ enum DiminishingReturnsType
 };
 
 // Diminishing Return Groups
-enum DiminishingGroup
+enum DiminishingGroup : uint16
 {
     DIMINISHING_NONE                = 0,
     DIMINISHING_BANISH              = 1,
@@ -3122,7 +3765,9 @@ enum DiminishingGroup
     DIMINISHING_SLEEP               = 17,
     DIMINISHING_TAUNT               = 18,
     DIMINISHING_LIMITONLY           = 19,
-    DIMINISHING_DRAGONS_BREATH      = 20
+    DIMINISHING_DRAGONS_BREATH      = 20,
+
+    DIMINISHING_MAX
 };
 
 enum SummonCategory
@@ -3136,144 +3781,172 @@ enum SummonCategory
                                      // uses this category
 };
 
-enum SummonType
+enum class SummonTitle : int32
 {
-    SUMMON_TYPE_NONE        = 0,
-    SUMMON_TYPE_PET         = 1,
-    SUMMON_TYPE_GUARDIAN    = 2,
-    SUMMON_TYPE_MINION      = 3,
-    SUMMON_TYPE_TOTEM       = 4,
-    SUMMON_TYPE_MINIPET     = 5,
-    SUMMON_TYPE_GUARDIAN2   = 6,
-    SUMMON_TYPE_WILD2       = 7,
-    SUMMON_TYPE_WILD3       = 8,    // Related to phases and DK prequest line (3.3.5a)
-    SUMMON_TYPE_VEHICLE     = 9,
-    SUMMON_TYPE_VEHICLE2    = 10,   // Oculus and Argent Tournament vehicles (3.3.5a)
-    SUMMON_TYPE_LIGHTWELL   = 11,
-    SUMMON_TYPE_JEEVES      = 12
+    None                = 0,
+    Pet                 = 1,
+    Guardian            = 2,
+    Minion              = 3,
+    Totem               = 4,
+    Companion           = 5,
+    Runeblade           = 6,
+    Construct           = 7,
+    Opponent            = 8,    // Related to phases and DK prequest line (3.3.5a)
+    Vehicle             = 9,
+    Mount               = 10,   // Oculus and Argent Tournament vehicles (3.3.5a)
+    Lightwell           = 11,
+    Butler              = 12,
+    aka                 = 13
 };
+
+enum SummonSlot
+{
+    SUMMON_SLOT_PET         = 0,
+    SUMMON_SLOT_TOTEM_FIRE  = 1,
+    SUMMON_SLOT_TOTEM_EARTH = 2,
+    SUMMON_SLOT_TOTEM_WATER = 3,
+    SUMMON_SLOT_TOTEM_AIR   = 4,
+    SUMMON_SLOT_MINIPET     = 5,
+    SUMMON_SLOT_QUEST       = 6,
+
+    MAX_SUMMON_SLOT
+};
+
+#define MAX_TOTEM_SLOT      5
+#define MAX_GAMEOBJECT_SLOT 4
 
 enum EventId
 {
     EVENT_CHARGE            = 1003,
-    EVENT_JUMP              = 1004
+    EVENT_JUMP              = 1004,
+
+    /// Special charge event which is used for charge spells that have explicit targets
+    /// and had a path already generated - using it in PointMovementGenerator will not
+    /// create a new spline and launch it
+    EVENT_CHARGE_PREPATH    = 1005,
+
+    EVENT_FACE              = 1006,
+    EVENT_VEHICLE_BOARD     = 1007,
+    EVENT_VEHICLE_EXIT      = 1008
 };
 
 enum ResponseCodes
 {
-    RESPONSE_SUCCESS                                       = 0x00,
-    RESPONSE_FAILURE                                       = 0x01,
-    RESPONSE_CANCELLED                                     = 0x02,
-    RESPONSE_DISCONNECTED                                  = 0x03,
-    RESPONSE_FAILED_TO_CONNECT                             = 0x04,
-    RESPONSE_CONNECTED                                     = 0x05,
-    RESPONSE_VERSION_MISMATCH                              = 0x06,
+    RESPONSE_SUCCESS                                       = 0,
+    RESPONSE_FAILURE                                       = 1,
+    RESPONSE_CANCELLED                                     = 2,
+    RESPONSE_DISCONNECTED                                  = 3,
+    RESPONSE_FAILED_TO_CONNECT                             = 4,
+    RESPONSE_CONNECTED                                     = 5,
+    RESPONSE_VERSION_MISMATCH                              = 6,
 
-    CSTATUS_CONNECTING                                     = 0x07,
-    CSTATUS_NEGOTIATING_SECURITY                           = 0x08,
-    CSTATUS_NEGOTIATION_COMPLETE                           = 0x09,
-    CSTATUS_NEGOTIATION_FAILED                             = 0x0A,
-    CSTATUS_AUTHENTICATING                                 = 0x0B,
+    CSTATUS_CONNECTING                                     = 7,
+    CSTATUS_NEGOTIATING_SECURITY                           = 8,
+    CSTATUS_NEGOTIATION_COMPLETE                           = 9,
+    CSTATUS_NEGOTIATION_FAILED                             = 10,
+    CSTATUS_AUTHENTICATING                                 = 11,
 
-    AUTH_OK                                                = 0x0C,
-    AUTH_FAILED                                            = 0x0D,
-    AUTH_REJECT                                            = 0x0E,
-    AUTH_BAD_SERVER_PROOF                                  = 0x0F,
-    AUTH_UNAVAILABLE                                       = 0x10,
-    AUTH_SYSTEM_ERROR                                      = 0x11,
-    AUTH_BILLING_ERROR                                     = 0x12,
-    AUTH_BILLING_EXPIRED                                   = 0x13,
-    AUTH_VERSION_MISMATCH                                  = 0x14,
-    AUTH_UNKNOWN_ACCOUNT                                   = 0x15,
-    AUTH_INCORRECT_PASSWORD                                = 0x16,
-    AUTH_SESSION_EXPIRED                                   = 0x17,
-    AUTH_SERVER_SHUTTING_DOWN                              = 0x18,
-    AUTH_ALREADY_LOGGING_IN                                = 0x19,
-    AUTH_LOGIN_SERVER_NOT_FOUND                            = 0x1A,
-    AUTH_WAIT_QUEUE                                        = 0x1B,
-    AUTH_BANNED                                            = 0x1C,
-    AUTH_ALREADY_ONLINE                                    = 0x1D,
-    AUTH_NO_TIME                                           = 0x1E,
-    AUTH_DB_BUSY                                           = 0x1F,
-    AUTH_SUSPENDED                                         = 0x20,
-    AUTH_PARENTAL_CONTROL                                  = 0x21,
-    AUTH_LOCKED_ENFORCED                                   = 0x22,
+    AUTH_OK                                                = 12,
+    AUTH_FAILED                                            = 13,
+    AUTH_REJECT                                            = 14,
+    AUTH_BAD_SERVER_PROOF                                  = 15,
+    AUTH_UNAVAILABLE                                       = 16,
+    AUTH_SYSTEM_ERROR                                      = 17,
+    AUTH_BILLING_ERROR                                     = 18,
+    AUTH_BILLING_EXPIRED                                   = 19,
+    AUTH_VERSION_MISMATCH                                  = 20,
+    AUTH_UNKNOWN_ACCOUNT                                   = 21,
+    AUTH_INCORRECT_PASSWORD                                = 22,
+    AUTH_SESSION_EXPIRED                                   = 23,
+    AUTH_SERVER_SHUTTING_DOWN                              = 24,
+    AUTH_ALREADY_LOGGING_IN                                = 25,
+    AUTH_LOGIN_SERVER_NOT_FOUND                            = 26,
+    AUTH_WAIT_QUEUE                                        = 27,
+    AUTH_BANNED                                            = 28,
+    AUTH_ALREADY_ONLINE                                    = 29,
+    AUTH_NO_TIME                                           = 30,
+    AUTH_DB_BUSY                                           = 31,
+    AUTH_SUSPENDED                                         = 32,
+    AUTH_PARENTAL_CONTROL                                  = 33,
+    AUTH_LOCKED_ENFORCED                                   = 34,
 
-    REALM_LIST_IN_PROGRESS                                 = 0x23,
-    REALM_LIST_SUCCESS                                     = 0x24,
-    REALM_LIST_FAILED                                      = 0x25,
-    REALM_LIST_INVALID                                     = 0x26,
-    REALM_LIST_REALM_NOT_FOUND                             = 0x27,
+    REALM_LIST_IN_PROGRESS                                 = 35,
+    REALM_LIST_SUCCESS                                     = 36,
+    REALM_LIST_FAILED                                      = 37,
+    REALM_LIST_INVALID                                     = 38,
+    REALM_LIST_REALM_NOT_FOUND                             = 39,
 
-    ACCOUNT_CREATE_IN_PROGRESS                             = 0x28,
-    ACCOUNT_CREATE_SUCCESS                                 = 0x29,
-    ACCOUNT_CREATE_FAILED                                  = 0x2A,
+    ACCOUNT_CREATE_IN_PROGRESS                             = 40,
+    ACCOUNT_CREATE_SUCCESS                                 = 41,
+    ACCOUNT_CREATE_FAILED                                  = 42,
 
-    CHAR_LIST_RETRIEVING                                   = 0x2B,
-    CHAR_LIST_RETRIEVED                                    = 0x2C,
-    CHAR_LIST_FAILED                                       = 0x2D,
+    CHAR_LIST_RETRIEVING                                   = 43,
+    CHAR_LIST_RETRIEVED                                    = 44,
+    CHAR_LIST_FAILED                                       = 45,
 
-    CHAR_CREATE_IN_PROGRESS                                = 0x2E,
-    CHAR_CREATE_SUCCESS                                    = 0x2F,
-    CHAR_CREATE_ERROR                                      = 0x30,
-    CHAR_CREATE_FAILED                                     = 0x31,
-    CHAR_CREATE_NAME_IN_USE                                = 0x32,
-    CHAR_CREATE_DISABLED                                   = 0x33,
-    CHAR_CREATE_PVP_TEAMS_VIOLATION                        = 0x34,
-    CHAR_CREATE_SERVER_LIMIT                               = 0x35,
-    CHAR_CREATE_ACCOUNT_LIMIT                              = 0x36,
-    CHAR_CREATE_SERVER_QUEUE                               = 0x37,
-    CHAR_CREATE_ONLY_EXISTING                              = 0x38,
-    CHAR_CREATE_EXPANSION                                  = 0x39,
-    CHAR_CREATE_EXPANSION_CLASS                            = 0x3A,
-    CHAR_CREATE_LEVEL_REQUIREMENT                          = 0x3B,
-    CHAR_CREATE_UNIQUE_CLASS_LIMIT                         = 0x3C,
-    CHAR_CREATE_CHARACTER_IN_GUILD                         = 0x3D,
-    CHAR_CREATE_RESTRICTED_RACECLASS                       = 0x3E,
-    CHAR_CREATE_CHARACTER_CHOOSE_RACE                      = 0x3F,
-    CHAR_CREATE_CHARACTER_ARENA_LEADER                     = 0x40,
-    CHAR_CREATE_CHARACTER_DELETE_MAIL                      = 0x41,
-    CHAR_CREATE_CHARACTER_SWAP_FACTION                     = 0x42,
-    CHAR_CREATE_CHARACTER_RACE_ONLY                        = 0x43,
-    CHAR_CREATE_CHARACTER_GOLD_LIMIT                       = 0x44,
-    CHAR_CREATE_FORCE_LOGIN                                = 0x45,
+    CHAR_CREATE_IN_PROGRESS                                = 46,
+    CHAR_CREATE_SUCCESS                                    = 47,
+    CHAR_CREATE_ERROR                                      = 48,
+    CHAR_CREATE_FAILED                                     = 49,
+    CHAR_CREATE_NAME_IN_USE                                = 50,
+    CHAR_CREATE_DISABLED                                   = 51,
+    CHAR_CREATE_PVP_TEAMS_VIOLATION                        = 52,
+    CHAR_CREATE_SERVER_LIMIT                               = 53,
+    CHAR_CREATE_ACCOUNT_LIMIT                              = 54,
+    CHAR_CREATE_SERVER_QUEUE                               = 55,
+    CHAR_CREATE_ONLY_EXISTING                              = 56,
+    CHAR_CREATE_EXPANSION                                  = 57,
+    CHAR_CREATE_EXPANSION_CLASS                            = 58,
+    CHAR_CREATE_LEVEL_REQUIREMENT                          = 59,
+    CHAR_CREATE_UNIQUE_CLASS_LIMIT                         = 60,
+    CHAR_CREATE_CHARACTER_IN_GUILD                         = 61,
+    CHAR_CREATE_RESTRICTED_RACECLASS                       = 62,
+    CHAR_CREATE_CHARACTER_CHOOSE_RACE                      = 63,
+    CHAR_CREATE_CHARACTER_ARENA_LEADER                     = 64,
+    CHAR_CREATE_CHARACTER_DELETE_MAIL                      = 65,
+    CHAR_CREATE_CHARACTER_SWAP_FACTION                     = 66,
+    CHAR_CREATE_CHARACTER_RACE_ONLY                        = 67,
+    CHAR_CREATE_CHARACTER_GOLD_LIMIT                       = 68,
+    CHAR_CREATE_FORCE_LOGIN                                = 69,
 
-    CHAR_DELETE_IN_PROGRESS                                = 0x46,
-    CHAR_DELETE_SUCCESS                                    = 0x47,
-    CHAR_DELETE_FAILED                                     = 0x48,
-    CHAR_DELETE_FAILED_LOCKED_FOR_TRANSFER                 = 0x49,
-    CHAR_DELETE_FAILED_GUILD_LEADER                        = 0x4A,
-    CHAR_DELETE_FAILED_ARENA_CAPTAIN                       = 0x4B,
+    CHAR_DELETE_IN_PROGRESS                                = 70,
+    CHAR_DELETE_SUCCESS                                    = 71,
+    CHAR_DELETE_FAILED                                     = 72,
+    CHAR_DELETE_FAILED_LOCKED_FOR_TRANSFER                 = 73,
+    CHAR_DELETE_FAILED_GUILD_LEADER                        = 74,
+    CHAR_DELETE_FAILED_ARENA_CAPTAIN                       = 75,
+    CHAR_DELETE_FAILED_HAS_HEIRLOOM_OR_MAIL                = 76,
 
-    CHAR_LOGIN_IN_PROGRESS                                 = 0x4C,
-    CHAR_LOGIN_SUCCESS                                     = 0x4D,
-    CHAR_LOGIN_NO_WORLD                                    = 0x4E,
-    CHAR_LOGIN_DUPLICATE_CHARACTER                         = 0x4F,
-    CHAR_LOGIN_NO_INSTANCES                                = 0x50,
-    CHAR_LOGIN_FAILED                                      = 0x51,
-    CHAR_LOGIN_DISABLED                                    = 0x52,
-    CHAR_LOGIN_NO_CHARACTER                                = 0x53,
-    CHAR_LOGIN_LOCKED_FOR_TRANSFER                         = 0x54,
-    CHAR_LOGIN_LOCKED_BY_BILLING                           = 0x55,
-    CHAR_LOGIN_LOCKED_BY_MOBILE_AH                         = 0x56,
+    CHAR_LOGIN_IN_PROGRESS                                 = 77,
+    CHAR_LOGIN_SUCCESS                                     = 78,
+    CHAR_LOGIN_NO_WORLD                                    = 79,
+    CHAR_LOGIN_DUPLICATE_CHARACTER                         = 80,
+    CHAR_LOGIN_NO_INSTANCES                                = 81,
+    CHAR_LOGIN_FAILED                                      = 82,
+    CHAR_LOGIN_DISABLED                                    = 83,
+    CHAR_LOGIN_NO_CHARACTER                                = 84,
+    CHAR_LOGIN_LOCKED_FOR_TRANSFER                         = 85,
+    CHAR_LOGIN_LOCKED_BY_BILLING                           = 86,
+    CHAR_LOGIN_LOCKED_BY_MOBILE_AH                         = 87,
+    CHAR_LOGIN_TEMPORARY_GM_LOCK                           = 88,
 
-    CHAR_NAME_SUCCESS                                      = 0x57,
-    CHAR_NAME_FAILURE                                      = 0x58,
-    CHAR_NAME_NO_NAME                                      = 0x59,
-    CHAR_NAME_TOO_SHORT                                    = 0x5A,
-    CHAR_NAME_TOO_LONG                                     = 0x5B,
-    CHAR_NAME_INVALID_CHARACTER                            = 0x5C,
-    CHAR_NAME_MIXED_LANGUAGES                              = 0x5D,
-    CHAR_NAME_PROFANE                                      = 0x5E,
-    CHAR_NAME_RESERVED                                     = 0x5F,
-    CHAR_NAME_INVALID_APOSTROPHE                           = 0x60,
-    CHAR_NAME_MULTIPLE_APOSTROPHES                         = 0x61,
-    CHAR_NAME_THREE_CONSECUTIVE                            = 0x62,
-    CHAR_NAME_INVALID_SPACE                                = 0x63,
-    CHAR_NAME_CONSECUTIVE_SPACES                           = 0x64,
-    CHAR_NAME_RUSSIAN_CONSECUTIVE_SILENT_CHARACTERS        = 0x65,
-    CHAR_NAME_RUSSIAN_SILENT_CHARACTER_AT_BEGINNING_OR_END = 0x66,
-    CHAR_NAME_DECLENSION_DOESNT_MATCH_BASE_NAME            = 0x67
+    CHAR_NAME_SUCCESS                                      = 89,
+    CHAR_NAME_FAILURE                                      = 90,
+    CHAR_NAME_NO_NAME                                      = 91,
+    CHAR_NAME_TOO_SHORT                                    = 92,
+    CHAR_NAME_TOO_LONG                                     = 93,
+    CHAR_NAME_INVALID_CHARACTER                            = 94,
+    CHAR_NAME_MIXED_LANGUAGES                              = 95,
+    CHAR_NAME_PROFANE                                      = 96,
+    CHAR_NAME_RESERVED                                     = 97,
+    CHAR_NAME_INVALID_APOSTROPHE                           = 98,
+    CHAR_NAME_MULTIPLE_APOSTROPHES                         = 99,
+    CHAR_NAME_THREE_CONSECUTIVE                            = 100,
+    CHAR_NAME_INVALID_SPACE                                = 101,
+    CHAR_NAME_CONSECUTIVE_SPACES                           = 102,
+    CHAR_NAME_RUSSIAN_CONSECUTIVE_SILENT_CHARACTERS        = 103,
+    CHAR_NAME_RUSSIAN_SILENT_CHARACTER_AT_BEGINNING_OR_END = 104,
+    CHAR_NAME_DECLENSION_DOESNT_MATCH_BASE_NAME            = 105,
 };
 
 /// Ban function modes
@@ -3289,29 +3962,47 @@ enum BanReturn
 {
     BAN_SUCCESS,
     BAN_SYNTAX_ERROR,
-    BAN_NOTFOUND
+    BAN_NOTFOUND,
+    BAN_EXISTS
 };
+
+enum BattlegroundTeamId
+{
+    BG_TEAM_HORDE       = 0, // Battleground: Horde,    Arena: Green
+    BG_TEAM_ALLIANCE    = 1, // Battleground: Alliance, Arena: Gold
+    BG_TEAM_NEUTRAL     = 2  // Battleground: Neutral,  Arena: None
+};
+
+#define BG_TEAMS_COUNT  2
 
 // indexes of BattlemasterList.dbc
-enum BattlegroundTypeId
+enum BattlegroundTypeId : uint32
 {
-    BATTLEGROUND_TYPE_NONE      = 0, // None
-    BATTLEGROUND_AV             = 1, // Alterac Valley
-    BATTLEGROUND_WS             = 2, // Warsong Gulch
-    BATTLEGROUND_AB             = 3, // Arathi Basin
-    BATTLEGROUND_NA             = 4, // Nagrand Arena
-    BATTLEGROUND_BE             = 5, // Blade's Edge Arena
-    BATTLEGROUND_AA             = 6, // All Arenas
-    BATTLEGROUND_EY             = 7, // Eye of the Storm
-    BATTLEGROUND_RL             = 8, // Ruins of Lordaernon
-    BATTLEGROUND_SA             = 9, // Strand of the Ancients
-    BATTLEGROUND_DS             = 10, // Dalaran Sewers
-    BATTLEGROUND_RV             = 11, // Ring of Valor
-    BATTLEGROUND_IC             = 30, // Isle of Conquest
-    BATTLEGROUND_RB             = 32 // Random Battleground
+    BATTLEGROUND_TYPE_NONE      = 0,   // None
+    BATTLEGROUND_AV             = 1,   // Alterac Valley
+    BATTLEGROUND_WS             = 2,   // Warsong Gulch
+    BATTLEGROUND_AB             = 3,   // Arathi Basin
+    BATTLEGROUND_NA             = 4,   // Nagrand Arena
+    BATTLEGROUND_BE             = 5,   // Blade's Edge Arena
+    BATTLEGROUND_AA             = 6,   // All Arenas
+    BATTLEGROUND_EY             = 7,   // Eye of the Storm
+    BATTLEGROUND_RL             = 8,   // Ruins of Lordaernon
+    BATTLEGROUND_SA             = 9,   // Strand of the Ancients
+    BATTLEGROUND_DS             = 10,  // Dalaran Sewers
+    BATTLEGROUND_RV             = 11,  // Ring of Valor
+    BATTLEGROUND_IC             = 30,  // Isle of Conquest
+    BATTLEGROUND_RB             = 32,  // Random Battleground
+    BATTLEGROUND_RATED_10_VS_10 = 100, // Rated BG 10 vs 10
+    BATTLEGROUND_RATED_15_VS_15 = 101, // Rated BG 15 vs 15
+    BATTLEGROUND_RATED_25_VS_25 = 102, // Rated BG 25 vs 25
+    BATTLEGROUND_TP             = 108, // Twin Peaks
+    BATTLEGROUND_BFG            = 120, // Battle For Gilneas
+    // 441 = "Icecrown Citadel"
+    // 443 = "The Ruby Sanctum"
+    // 656 = "Rated Eye of the Storm"
 };
 
-#define MAX_BATTLEGROUND_TYPE_ID 33
+#define MAX_BATTLEGROUND_TYPE_ID 121
 
 enum MailResponseType
 {
@@ -3360,38 +4051,47 @@ enum SpellFamilyNames
     // 14 - unused
     SPELLFAMILY_DEATHKNIGHT = 15,
     // 16 - unused
-    SPELLFAMILY_PET         = 17
+    SPELLFAMILY_PET         = 17,
+    SPELLFAMILY_UNK3        = 50,
 };
 
 enum TradeStatus
 {
-    TRADE_STATUS_BUSY           = 0,
-    TRADE_STATUS_BEGIN_TRADE    = 1,
-    TRADE_STATUS_OPEN_WINDOW    = 2,
-    TRADE_STATUS_TRADE_CANCELED = 3,
-    TRADE_STATUS_TRADE_ACCEPT   = 4,
-    TRADE_STATUS_BUSY_2         = 5,
-    TRADE_STATUS_NO_TARGET      = 6,
-    TRADE_STATUS_BACK_TO_TRADE  = 7,
-    TRADE_STATUS_TRADE_COMPLETE = 8,
-    // 9?
-    TRADE_STATUS_TARGET_TO_FAR  = 10,
-    TRADE_STATUS_WRONG_FACTION  = 11,
-    TRADE_STATUS_CLOSE_WINDOW   = 12,
-    // 13?
-    TRADE_STATUS_IGNORE_YOU     = 14,
-    TRADE_STATUS_YOU_STUNNED    = 15,
-    TRADE_STATUS_TARGET_STUNNED = 16,
-    TRADE_STATUS_YOU_DEAD       = 17,
-    TRADE_STATUS_TARGET_DEAD    = 18,
-    TRADE_STATUS_YOU_LOGOUT     = 19,
-    TRADE_STATUS_TARGET_LOGOUT  = 20,
-    TRADE_STATUS_TRIAL_ACCOUNT  = 21,                       // Trial accounts can not perform that action
-    TRADE_STATUS_ONLY_CONJURED  = 22,                       // You can only trade conjured items... (cross realm BG related).
-    TRADE_STATUS_NOT_ELIGIBLE   = 23                        // Related to trading soulbound loot items
+    TRADE_STATUS_INITIATED              = 0,
+    // 1 - Related to EVENT_PLAYER_MONEY
+    TRADE_STATUS_NOT_ON_TAPLIST         = 2,           // Related to trading soulbound loot items
+    TRADE_STATUS_YOU_LOGOUT             = 3,
+    TRADE_STATUS_IGNORE_YOU             = 4,
+    TRADE_STATUS_TARGET_DEAD            = 5,
+    TRADE_STATUS_TRADE_ACCEPT           = 6,
+    TRADE_STATUS_TARGET_LOGOUT          = 7,
+    // 8 - nonexistent
+    TRADE_STATUS_TRADE_COMPLETE         = 9,
+    TRADE_STATUS_TRIAL_ACCOUNT          = 10, // Trial accounts can not perform that action
+    // 11 - nonexistent
+    TRADE_STATUS_BEGIN_TRADE            = 12,
+    TRADE_STATUS_YOU_DEAD               = 13,
+    // 14 - nonexistent
+    // 15 - nonexistent
+    TRADE_STATUS_TARGET_TO_FAR          = 16,
+    TRADE_STATUS_NO_TARGET              = 17,
+    TRADE_STATUS_BUSY_2                 = 18,
+    TRADE_STATUS_CURRENCY_NOT_TRADABLE  = 19, // new 4.x
+    TRADE_STATUS_WRONG_FACTION          = 20,
+    TRADE_STATUS_BUSY                   = 21,
+    TRADE_STATUS_STATE_CHANGED          = 22,
+    TRADE_STATUS_TRADE_CANCELED         = 23,
+    TRADE_STATUS_CURRENCY               = 24, // new 4.x
+    TRADE_STATUS_UNACCEPTED             = 25,
+    TRADE_STATUS_WRONG_REALM            = 26, // You can only trade conjured items... (cross realm BG related).
+    TRADE_STATUS_YOU_STUNNED            = 27,
+    // 28 - nonexistent
+    TRADE_STATUS_TARGET_STUNNED         = 29,
+    // 30 - nonexistent
+    TRADE_STATUS_FAILED                 = 31
 };
 
-enum XPColorChar
+enum XPColorChar : uint8
 {
     XP_RED,
     XP_ORANGE,
@@ -3400,7 +4100,7 @@ enum XPColorChar
     XP_GRAY
 };
 
-enum RemoveMethod
+enum RemoveMethod : uint8
 {
     GROUP_REMOVEMETHOD_DEFAULT  = 0,
     GROUP_REMOVEMETHOD_KICK     = 1,
@@ -3425,12 +4125,19 @@ enum ActivateTaxiReply
     ERR_TAXINOTSTANDING             = 12
 };
 
-enum DuelCompleteType
+enum ProfessionUI
+{
+    MAX_PRIMARY_PROFESSIONS = 2,
+    MAX_SECONDARY_SKILLS = 5
+};
+
+enum DuelCompleteType : uint8
 {
     DUEL_INTERRUPTED = 0,
     DUEL_WON         = 1,
     DUEL_FLED        = 2
 };
+
 // handle the queue types and bg types separately to enable joining queue for different sized arenas at the same time
 enum BattlegroundQueueTypeId
 {
@@ -3441,32 +4148,44 @@ enum BattlegroundQueueTypeId
     BATTLEGROUND_QUEUE_EY       = 4,
     BATTLEGROUND_QUEUE_SA       = 5,
     BATTLEGROUND_QUEUE_IC       = 6,
-    BATTLEGROUND_QUEUE_RB       = 7,
-    BATTLEGROUND_QUEUE_2v2      = 8,
-    BATTLEGROUND_QUEUE_3v3      = 9,
-    BATTLEGROUND_QUEUE_5v5      = 10,
+    BATTLEGROUND_QUEUE_TP       = 7,
+    BATTLEGROUND_QUEUE_BFG      = 8,
+    BATTLEGROUND_QUEUE_RB       = 9,
+    BATTLEGROUND_QUEUE_2v2      = 10,
+    BATTLEGROUND_QUEUE_3v3      = 11,
+    BATTLEGROUND_QUEUE_5v5      = 12,
     MAX_BATTLEGROUND_QUEUE_TYPES
 };
 
 enum GroupJoinBattlegroundResult
 {
-    // positive values are indexes in BattlemasterList.dbc
-    ERR_GROUP_JOIN_BATTLEGROUND_FAIL        = 0,            // Your group has joined a battleground queue, but you are not eligible (showed for non existing BattlemasterList.dbc indexes)
-    ERR_BATTLEGROUND_NONE                   = -1,           // not show anything
-    ERR_GROUP_JOIN_BATTLEGROUND_DESERTERS   = -2,           // You cannot join the battleground yet because you or one of your party members is flagged as a Deserter.
-    ERR_ARENA_TEAM_PARTY_SIZE               = -3,           // Incorrect party size for this arena.
-    ERR_BATTLEGROUND_TOO_MANY_QUEUES        = -4,           // You can only be queued for 2 battles at once
-    ERR_BATTLEGROUND_CANNOT_QUEUE_FOR_RATED = -5,           // You cannot queue for a rated match while queued for other battles
-    ERR_BATTLEDGROUND_QUEUED_FOR_RATED      = -6,           // You cannot queue for another battle while queued for a rated arena match
-    ERR_BATTLEGROUND_TEAM_LEFT_QUEUE        = -7,           // Your team has left the arena queue
-    ERR_BATTLEGROUND_NOT_IN_BATTLEGROUND    = -8,           // You can't do that in a battleground.
-    ERR_BATTLEGROUND_JOIN_XP_GAIN           = -9,           // wtf, doesn't exist in client...
-    ERR_BATTLEGROUND_JOIN_RANGE_INDEX       = -10,          // Cannot join the queue unless all members of your party are in the same battleground level range.
-    ERR_BATTLEGROUND_JOIN_TIMED_OUT         = -11,          // %s was unavailable to join the queue. (uint64 guid exist in client cache)
-    ERR_BATTLEGROUND_JOIN_FAILED            = -12,          // Join as a group failed (uint64 guid doesn't exist in client cache)
-    ERR_LFG_CANT_USE_BATTLEGROUND           = -13,          // You cannot queue for a battleground or arena while using the dungeon system.
-    ERR_IN_RANDOM_BG                        = -14,          // Can't do that while in a Random Battleground queue.
-    ERR_IN_NON_RANDOM_BG                    = -15           // Can't queue for Random Battleground while in another Battleground queue.
+    ERR_BATTLEGROUND_NONE                           = 0,
+    ERR_GROUP_JOIN_BATTLEGROUND_DESERTERS           = 2,        // You cannot join the battleground yet because you or one of your party members is flagged as a Deserter.
+    ERR_ARENA_TEAM_PARTY_SIZE                       = 3,        // Incorrect party size for this arena.
+    ERR_BATTLEGROUND_TOO_MANY_QUEUES                = 4,        // You can only be queued for 2 battles at once
+    ERR_BATTLEGROUND_CANNOT_QUEUE_FOR_RATED         = 5,        // You cannot queue for a rated match while queued for other battles
+    ERR_BATTLEDGROUND_QUEUED_FOR_RATED              = 6,        // You cannot queue for another battle while queued for a rated arena match
+    ERR_BATTLEGROUND_TEAM_LEFT_QUEUE                = 7,        // Your team has left the arena queue
+    ERR_BATTLEGROUND_NOT_IN_BATTLEGROUND            = 8,        // You can't do that in a battleground.
+    ERR_BATTLEGROUND_JOIN_XP_GAIN                   = 9,        // wtf, doesn't exist in client...
+    ERR_BATTLEGROUND_JOIN_RANGE_INDEX               = 10,       // Cannot join the queue unless all members of your party are in the same battleground level range.
+    ERR_BATTLEGROUND_JOIN_TIMED_OUT                 = 11,       // %s was unavailable to join the queue. (uint64 guid exist in client cache)
+    //ERR_BATTLEGROUND_JOIN_TIMED_OUT               = 12,       // same as 11
+    //ERR_BATTLEGROUND_TEAM_LEFT_QUEUE              = 13,       // same as 7
+    ERR_LFG_CANT_USE_BATTLEGROUND                   = 14,       // You cannot queue for a battleground or arena while using the dungeon system.
+    ERR_IN_RANDOM_BG                                = 15,       // Can't do that while in a Random Battleground queue.
+    ERR_IN_NON_RANDOM_BG                            = 16,       // Can't queue for Random Battleground while in another Battleground queue.
+    ERR_BG_DEVELOPER_ONLY                           = 17,
+    ERR_BATTLEGROUND_INVITATION_DECLINED            = 18,
+    ERR_MEETING_STONE_NOT_FOUND                     = 19,
+    ERR_WARGAME_REQUEST_FAILURE                     = 20,
+    ERR_BATTLEFIELD_TEAM_PARTY_SIZE                 = 22,
+    ERR_NOT_ON_TOURNAMENT_REALM                     = 23,
+    ERR_BATTLEGROUND_PLAYERS_FROM_DIFFERENT_REALMS  = 24,
+    ERR_REMOVE_FROM_PVP_QUEUE_GRANT_LEVEL           = 33,
+    ERR_REMOVE_FROM_PVP_QUEUE_FACTION_CHANGE        = 34,
+    ERR_BATTLEGROUND_JOIN_FAILED                    = 35,
+    ERR_BATTLEGROUND_DUPE_QUEUE                     = 43
 };
 
 enum PetNameInvalidReason
@@ -3500,6 +4219,28 @@ enum DungeonStatusFlag
     RAID_STATUSFLAG_25MAN_HEROIC = 0x08
 };
 
+#define VOID_STORAGE_UNLOCK       100*GOLD
+#define VOID_STORAGE_STORE_ITEM   25*GOLD
+#define VOID_STORAGE_MAX_DEPOSIT  9
+#define VOID_STORAGE_MAX_WITHDRAW 9
+#define VOID_STORAGE_MAX_SLOT     80
+
+enum VoidTransferError
+{
+    VOID_TRANSFER_ERROR_NO_ERROR          = 0,
+    VOID_TRANSFER_ERROR_INTERNAL_ERROR_1  = 1,
+    VOID_TRANSFER_ERROR_INTERNAL_ERROR_2  = 2,
+    VOID_TRANSFER_ERROR_FULL              = 3,
+    VOID_TRANSFER_ERROR_INTERNAL_ERROR_3  = 4,
+    VOID_TRANSFER_ERROR_INTERNAL_ERROR_4  = 5,
+    VOID_TRANSFER_ERROR_NOT_ENOUGH_MONEY  = 6,
+    VOID_TRANSFER_ERROR_INVENTORY_FULL    = 7,
+    VOID_TRANSFER_ERROR_INTERNAL_ERROR_5  = 8,
+    VOID_TRANSFER_ERROR_TRANSFER_UNKNOWN  = 9,
+};
+
+#define CURRENCY_PRECISION 100
+
 enum PartyResult
 {
     ERR_PARTY_RESULT_OK                 = 0,
@@ -3532,5 +4273,81 @@ enum PartyResult
     ERR_PARTY_LFG_BOOT_LOOT_ROLLS       = 29,
     ERR_PARTY_LFG_TELEPORT_IN_COMBAT    = 30
 };
+
+enum DiminishingLevels
+{
+    DIMINISHING_LEVEL_1             = 0,
+    DIMINISHING_LEVEL_2             = 1,
+    DIMINISHING_LEVEL_3             = 2,
+    DIMINISHING_LEVEL_IMMUNE        = 3,
+    DIMINISHING_LEVEL_4             = 3,
+    DIMINISHING_LEVEL_TAUNT_IMMUNE  = 4
+};
+
+enum WeaponAttackType : uint8
+{
+    BASE_ATTACK   = 0,
+    OFF_ATTACK    = 1,
+    RANGED_ATTACK = 2,
+    MAX_ATTACK
+};
+
+enum LineOfSightChecks
+{
+    LINEOFSIGHT_CHECK_VMAP      = 0x1, // check static floor layout data
+    LINEOFSIGHT_CHECK_GOBJECT   = 0x2, // check dynamic game object data
+
+    LINEOFSIGHT_ALL_CHECKS      = (LINEOFSIGHT_CHECK_VMAP | LINEOFSIGHT_CHECK_GOBJECT)
+};
+
+enum ContentLevels : uint8
+{
+    CONTENT_1_60    = 0,
+    CONTENT_61_70   = 1,
+    CONTENT_71_80   = 2,
+    CONTENT_81_85   = 3,
+    MAX_CONTENT
+};
+
+enum UpdateCollisionHeightReason : uint8
+{
+    UPDATE_COLLISION_HEIGHT_MOUNT = 0,
+    UPDATE_COLLISION_HEIGHT_SCALE = 1
+};
+
+enum class MountResult : uint32
+{
+    InvalidMountee = 0,
+    TooFarAway     = 1,
+    AlreadyMounted = 2,
+    NotMountable   = 3,
+    NotYourPet     = 4,
+    Other          = 5,
+    Looting        = 6,
+    RaceCantMount  = 7,
+    Shapeshifted   = 8,
+    ForcedDismount = 9,
+    Ok             = 10 // never sent
+};
+
+enum class PursuingType : uint8
+{
+    Follow      = 0,
+    Chase       = 1,
+    Formation   = 2,
+    Max         = 3
+};
+
+
+enum RaidGroupReason
+{
+    RAID_GROUP_ERR_NONE                 = 0,
+    RAID_GROUP_ERR_LOWLEVEL             = 1, // "You are too low level to enter this instance."
+    RAID_GROUP_ERR_ONLY                 = 2, // "You must be in a raid group to enter this instance."
+    RAID_GROUP_ERR_FULL                 = 3, // "The instance is full."
+    RAID_GROUP_ERR_REQUIREMENTS_UNMATCH = 4  // "You do not meet the requirements to enter this instance."
+};
+
+#define MAX_CREATURE_SPELL_DATA_SLOT 4
 
 #endif

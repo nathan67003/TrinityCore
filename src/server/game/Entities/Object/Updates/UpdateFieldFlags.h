@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2013 TrinityCore <http://www.trinitycore.org/>
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -31,14 +31,15 @@ enum UpdatefieldFlags
     UF_FLAG_ITEM_OWNER   = 0x010,
     UF_FLAG_SPECIAL_INFO = 0x020,
     UF_FLAG_PARTY_MEMBER = 0x040,
-    UF_FLAG_UNUSED2      = 0x080,
+    UF_FLAG_UNIT_ALL     = 0x080,
     UF_FLAG_DYNAMIC      = 0x100
 };
 
-extern uint32 ItemUpdateFieldFlags[CONTAINER_END];
-extern uint32 UnitUpdateFieldFlags[PLAYER_END];
-extern uint32 GameObjectUpdateFieldFlags[GAMEOBJECT_END];
-extern uint32 DynamicObjectUpdateFieldFlags[DYNAMICOBJECT_END];
-extern uint32 CorpseUpdateFieldFlags[CORPSE_END];
+TC_GAME_API extern uint32 ItemUpdateFieldFlags[CONTAINER_END];
+TC_GAME_API extern uint32 UnitUpdateFieldFlags[PLAYER_END];
+TC_GAME_API extern uint32 GameObjectUpdateFieldFlags[GAMEOBJECT_END];
+TC_GAME_API extern uint32 DynamicObjectUpdateFieldFlags[DYNAMICOBJECT_END];
+TC_GAME_API extern uint32 CorpseUpdateFieldFlags[CORPSE_END];
+TC_GAME_API extern uint32 AreaTriggerUpdateFieldFlags[AREATRIGGER_END];
 
 #endif // _UPDATEFIELDFLAGS_H

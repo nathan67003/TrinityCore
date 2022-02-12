@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2013 TrinityCore <http://www.trinitycore.org/>
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -18,26 +18,40 @@
 #ifndef __SPELL_SCRIPT_H
 #define __SPELL_SCRIPT_H
 
-#include "Util.h"
+#include "ObjectGuid.h"
+#include "Optional.h"
 #include "SharedDefines.h"
 #include "SpellAuraDefines.h"
-#include "Spell.h"
+#include "SpellInfo.h"
+#include "Utilities/StringFormat.h"
+#include "Util.h"
+#include "advstd.h"
+
+#include <memory>
+#include <functional>
 #include <stack>
 
-class Unit;
-class SpellInfo;
-class SpellScript;
-class Spell;
 class Aura;
+class AuraApplication;
 class AuraEffect;
-struct SpellModifier;
 class Creature;
-class GameObject;
+class Corpse;
+class DamageInfo;
+class DispelInfo;
 class DynamicObject;
-class Player;
+class GameObject;
 class Item;
+class ModuleReference;
+class Player;
+class ProcEventInfo;
+class Spell;
+class SpellScript;
+class Unit;
 class WorldLocation;
 class WorldObject;
+struct SpellDestination;
+struct SpellModifier;
+struct SpellValue;
 
 #define SPELL_EFFECT_ANY (uint16)-1
 #define SPELL_AURA_ANY (uint16)-1
@@ -51,8 +65,8 @@ enum SpellScriptState
 };
 #define SPELL_SCRIPT_STATE_END SPELL_SCRIPT_STATE_UNLOADING + 1
 
-// helper class from which SpellScript and SpellAura derive, use these classes instead
-class _SpellScript
+// helper class from which SpellScript and AuraScript derive, use these classes instead
+class TC_GAME_API _SpellScript
 {
     // internal use classes & functions
     // DO NOT OVERRIDE THESE IN SCRIPTS
@@ -60,51 +74,346 @@ class _SpellScript
         virtual bool _Validate(SpellInfo const* entry);
 
     public:
-        _SpellScript() : m_currentScriptState(SPELL_SCRIPT_STATE_NONE) {}
-        virtual ~_SpellScript() {}
-        virtual void _Register();
-        virtual void _Unload();
-        virtual void _Init(std::string const* scriptname, uint32 spellId);
+        _SpellScript() : m_currentScriptState(SPELL_SCRIPT_STATE_NONE), m_scriptName(nullptr), m_scriptSpellId(0) {}
+        virtual ~_SpellScript() { }
+        void _Register();
+        void _Unload();
+        void _Init(std::string const* scriptname, uint32 spellId);
         std::string const* _GetScriptName() const;
 
     protected:
-        class EffectHook
-        {
-            public:
-                EffectHook(uint8 _effIndex);
-                virtual ~EffectHook() { }
 
-                uint8 GetAffectedEffectsMask(SpellInfo const* spellEntry);
-                bool IsEffectAffected(SpellInfo const* spellEntry, uint8 effIndex);
-                virtual bool CheckEffect(SpellInfo const* spellEntry, uint8 effIndex) = 0;
-                std::string EffIndexToString();
-            protected:
-                uint8 effIndex;
+        /**
+         * Pseudo specialization (actually a new type) of HookList<T> that is able to give proper parameters to Register(...) to an IDE's autocomplete.
+         *
+         * Don't directly implement this type. Expose it as a typedef in your type instead.
+         */
+        template <typename T, typename... CtorArgs>
+        struct _HookList : HookList<T>
+        {
+            explicit _HookList(_SpellScript* owner) : _owner(owner) { }
+
+            template <typename Derived = _SpellScript>
+            void Register(typename T::template HookType<Derived> hookFunction, CtorArgs... args)
+            {
+                if (Derived* derivedOwner = dynamic_cast<Derived*>(_owner))
+                    return HookList<T>::Register(derivedOwner, hookFunction, std::forward<CtorArgs>(args)...);
+            }
+
+        private:
+            _SpellScript* _owner;
         };
 
-        class EffectNameCheck
+        /**
+         * Base type in charge of encapsulating a spellscript hook.
+         * Takes an instance of the spellscript and a member function pointer.
+         */
+        template <typename R, typename... Args>
+        struct TC_GAME_API HookHandler
         {
-            public:
-                EffectNameCheck(uint16 _effName) { effName = _effName; }
-                bool Check(SpellInfo const* spellEntry, uint8 effIndex);
-                std::string ToString();
-            private:
-                uint16 effName;
+            //> Type of the function pointer
+            template <typename T>
+            using HookType = R(T::*)(Args...);
+
+            using HookList = _SpellScript::_HookList<HookHandler<R, Args...>>;
+
+            template <typename Derived = _SpellScript>
+            HookHandler(Derived* owner, HookType<Derived> hookFunction)
+            {
+                _handler = [=](Args&&... args) -> R {
+                    // Value capture to avoid taking addresses of temporaries
+
+                    return (owner->*hookFunction)(std::forward<Args>(args)...);
+                };
+            }
+
+            R Call(Args... args)
+            {
+                return _handler(std::forward<Args>(args)...);
+            }
+
+        private:
+            std::function<R(Args...)> _handler;
         };
 
-        class EffectAuraNameCheck
+        /**
+         * Base type for hooks that filter on effect index.
+         * This type can't be directly used because it doesn't expose a HookList typedef.
+         */
+        template <typename R, typename... Args>
+        struct TC_GAME_API EffectIndexHookHandler : HookHandler<R, Args...>
         {
-            public:
-                EffectAuraNameCheck(uint16 _effAurName) { effAurName = _effAurName; }
-                bool Check(SpellInfo const* spellEntry, uint8 effIndex);
-                std::string ToString();
-            private:
-                uint16 effAurName;
+            //> Type of the required function pointer.
+            template <typename T>
+            using HookType = typename HookHandler<R, Args...>::template HookType<T>;
+
+            //> Base type shorthand.
+            using BaseHookHandler = HookHandler<R, Args...>;
+
+            template <typename Derived = _SpellScript>
+            EffectIndexHookHandler(Derived* owner, HookType<Derived> hookFunction, uint8 effIndex, std::function<bool(SpellEffectInfo const&)> effectInfoFilter)
+                : BaseHookHandler(owner, hookFunction), _effIndex(effIndex), _effectInfoFilter(effectInfoFilter)
+            {
+                // effect index must be in range <0;2>, allow use of special effindexes
+                ASSERT(_effIndex == EFFECT_ALL || _effIndex == EFFECT_FIRST_FOUND || _effIndex < MAX_SPELL_EFFECTS);
+            }
+
+            std::string ToString() const
+            {
+                return Trinity::StringFormat("Index: %s", EffectIndexToString());
+            }
+
+            uint32 GetAffectedEffectsMask(SpellInfo const* spellInfo)
+            {
+                uint32 effectMask = 0;
+                if (_effIndex == EFFECT_FIRST_FOUND || _effIndex == EFFECT_ALL)
+                {
+                    for (uint32 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+                    {
+                        if (_effectInfoFilter(spellInfo->Effects[i]))
+                            effectMask |= 1 << i;
+
+                        if (_effIndex == EFFECT_FIRST_FOUND && effectMask != 0)
+                            return effectMask;
+                    }
+                }
+                else if (_effIndex >= EFFECT_0 && _effIndex < MAX_SPELL_EFFECTS)
+                {
+                    if (_effectInfoFilter(spellInfo->Effects[_effIndex]))
+                        return 1 << _effIndex;
+                }
+
+                return effectMask;
+            }
+
+            bool Filter(SpellInfo const* spellInfo, SpellEffIndex effIndex)
+            {
+                return GetAffectedEffectsMask(spellInfo) & (1 << effIndex);
+            }
+
+        private:
+            uint8 _effIndex;
+            std::function<bool(SpellEffectInfo const&)> _effectInfoFilter;
+
+            const char* EffectIndexToString() const
+            {
+                switch (_effIndex)
+                {
+                    case EFFECT_ALL: return "EFFECT_ALL";
+                    case EFFECT_FIRST_FOUND: return "EFFECT_FIRST_FOUND";
+                    case EFFECT_0: return "EFFECT_0";
+                    case EFFECT_1: return "EFFECT_1";
+                    case EFFECT_2: return "EFFECT_2";
+                }
+
+                return "Invalid value";
+            }
+
+        };
+
+        /**
+         * Base type for hooks that filter on effect index AND effect name.
+         *
+         * If you were to declare a hook using this type, the signature of Register would be
+         *    Register(this, &class::function, EffectIndexSpecifier, EffectNameSpecifier)
+         */
+        template <typename R, typename... Args>
+        struct TC_GAME_API EffectNameHookHandler : EffectIndexHookHandler<R, Args...>
+        {
+            //> Type of the required function pointer.
+            template <typename T>
+            using HookType = typename EffectIndexHookHandler<R, Args...>::template HookType<T>;
+
+            //> Base type shorthand.
+            using BaseHookHandler = EffectIndexHookHandler<R, Args...>;
+
+            //> Type of the hook container list.
+            using HookList = _HookList<EffectNameHookHandler<R, Args...>, uint8, uint16>;
+
+            template <typename Derived = _SpellScript>
+            EffectNameHookHandler(Derived* owner, HookType<Derived> hookFunction, uint8 effIndex, uint16 effName)
+                : BaseHookHandler(owner, hookFunction, effIndex, 
+                    [_effectName = effName](SpellEffectInfo const& effectInfo) {
+                        return _effectName == SPELL_EFFECT_ANY || effectInfo.Effect == _effectName;
+                    }), _effName(effName)
+            {
+
+            }
+
+            std::string ToString() const
+            {
+                return Trinity::StringFormat("%s Name: %s", BaseHookHandler::ToString(), EffectNameToString());
+            }
+
+        private:
+            std::string EffectNameToString() const
+            {
+                if (_effName == SPELL_EFFECT_ANY)
+                    return "SPELL_EFFECT_ANY";
+
+                return Trinity::StringFormat("%u", _effName);
+            }
+
+            uint16 _effName;
+        };
+
+        /**
+         * Base type for hooks that filter on effect index AND target type.
+         *
+         * If you were to declare a hook using this type, the signature of Register would be
+         *    Register(this, &class::function, EffectIndexSpecifier, TargetNameSpecifier)
+         */
+        template <bool Area, bool Dest, typename R, typename... Args>
+        struct TC_GAME_API EffectTargetHookHandler : EffectIndexHookHandler<R, Args...>
+        {
+            //> Type of the required function pointer.
+            template <typename T>
+            using HookType = typename EffectIndexHookHandler<R, Args...>::template HookType<T>;
+
+            //> Base type shorthand.
+            using BaseHookHandler = EffectIndexHookHandler<R, Args...>;
+
+            //> Type of the hook container list.
+            using HookList = _HookList<EffectTargetHookHandler<Area, Dest, R, Args...>, uint8, uint16>;
+
+            template <typename Derived = _SpellScript>
+            EffectTargetHookHandler(Derived* owner, HookType<Derived> hookFunction, uint8 effIndex, uint16 targetType)
+                : BaseHookHandler(owner, hookFunction, effIndex,
+                    [_targetType = targetType](SpellEffectInfo const& effectInfo) {
+                        if (!_targetType)
+                            return false;
+
+                        if (effectInfo.TargetA.GetTarget() != _targetType && effectInfo.TargetB.GetTarget() != _targetType)
+                            return false;
+
+                        SpellImplicitTargetInfo targetInfo(_targetType);
+                        switch (targetInfo.GetSelectionCategory())
+                        {
+                            case TARGET_SELECT_CATEGORY_CHANNEL: // SINGLE
+                                return !Area;
+                            case TARGET_SELECT_CATEGORY_NEARBY: // BOTH
+                                return true;
+                            case TARGET_SELECT_CATEGORY_CONE: // AREA
+                            case TARGET_SELECT_CATEGORY_AREA: // AREA
+                                return Area;
+                            case TARGET_SELECT_CATEGORY_DEFAULT:
+                                switch (targetInfo.GetObjectType())
+                                {
+                                    case TARGET_OBJECT_TYPE_SRC: // EMPTY
+                                        return false;
+                                    case TARGET_OBJECT_TYPE_DEST: // DEST
+                                        return Dest;
+                                    default:
+                                        switch (targetInfo.GetReferenceType())
+                                        {
+                                            case TARGET_REFERENCE_TYPE_CASTER: // SINGLE
+                                                return !Area;
+                                            case TARGET_REFERENCE_TYPE_TARGET: // BOTH
+                                                return true;
+                                            default:
+                                                break;
+                                        }
+                                        break;
+                                }
+                                break;
+                            default:
+                                break;
+                        }
+
+                        return false;
+                    }), _targetType(targetType)
+            {
+
+            }
+
+            std::string ToString() const
+            {
+                return Trinity::StringFormat("%s Target: %u", BaseHookHandler::ToString(), _targetType);
+            }
+
+            uint16 GetTarget()
+            {
+                return _targetType;
+            }
+
+        private:
+            uint16 _targetType;
+        };
+
+        /**
+         * Base type for hooks that filter on effect index AND area target types.
+         */
+        using ObjectAreaTargetSelectHookHandler = EffectTargetHookHandler<true, false, void, std::list<WorldObject*>&>;
+
+        /**
+         * Base type for hooks that filter on effect index AND single target types.
+         */
+        using ObjectTargetSelectHookHandler = EffectTargetHookHandler<false, false, void, WorldObject*&>;
+
+        /**
+         * Base type for hooks that filter on effect index AND destination target types.
+         */
+        using DestinationTargetSelectHookHandler = EffectTargetHookHandler<false, true, void, SpellDestination&>;
+
+        /**
+         * Base type for hooks that filter on effect index AND aura name.
+         *
+         * If you were to declare a hook using this type, the signature of Register would be
+         *    Register(this, &class::function, EffectIndexSpecifier, AuraNameSpecifier)
+         */
+        template <typename R, typename... Args>
+        struct TC_GAME_API AuraNameHookHandler : EffectIndexHookHandler<R, Args...>
+        {
+            //> Type of the required function pointer.
+            template <typename T>
+            using HookType = typename EffectIndexHookHandler<R, Args...>::template HookType<T>;
+
+            //> Base type shorthand.
+            using BaseHookHandler = EffectIndexHookHandler<R, Args...>;
+
+            //> Type of the hook container list.
+            using HookList = _HookList<AuraNameHookHandler<R, Args...>, uint8, uint16>;
+
+            template <typename Derived = _SpellScript>
+            AuraNameHookHandler(Derived* owner, HookType<Derived> hookFunction, uint8 effIndex, uint16 auraName)
+                : BaseHookHandler(owner, hookFunction, effIndex,
+                    [_auraName = auraName](SpellEffectInfo const& effectInfo) {
+                        return _auraName == SPELL_AURA_ANY || effectInfo.ApplyAuraName == _auraName;
+                    }), _auraName(auraName)
+            {
+
+            }
+
+            std::string ToString() const
+            {
+                return Trinity::StringFormat("%s Name: %s", BaseHookHandler::ToString(), AuraNameToString());
+            }
+
+        private:
+            std::string AuraNameToString() const
+            {
+                if (_auraName == SPELL_AURA_ANY)
+                    return "SPELL_AURA_ANY";
+
+                return Trinity::StringFormat("%u", _auraName);
+            }
+
+            uint16 _auraName;
         };
 
         uint8 m_currentScriptState;
         std::string const* m_scriptName;
         uint32 m_scriptSpellId;
+
+    private:
+
+#ifdef TRINITY_API_USE_DYNAMIC_LINKING
+
+        // Strong reference to keep the binary code loaded
+        std::shared_ptr<ModuleReference> m_moduleReference;
+
+#endif // #ifndef TRINITY_API_USE_DYNAMIC_LINKING
+
     public:
         //
         // SpellScript/AuraScript interface base
@@ -114,13 +423,41 @@ class _SpellScript
         virtual void Register() = 0;
         // Function called on server startup, if returns false script won't be used in core
         // use for: dbc/template data presence/correctness checks
-        virtual bool Validate(SpellInfo const* /*spellEntry*/) { return true; }
+        virtual bool Validate(SpellInfo const* /*spellInfo*/) { return true; }
         // Function called when script is created, if returns false script will be unloaded afterwards
         // use for: initializing local script variables (DO NOT USE CONSTRUCTOR FOR THIS PURPOSE!)
         virtual bool Load() { return true; }
         // Function called when script is destroyed
         // use for: deallocating memory allocated by script
         virtual void Unload() { }
+        // Helpers
+        static bool ValidateSpellInfo(std::initializer_list<uint32> spellIds)
+        {
+            return _ValidateSpellInfo(spellIds.begin(), spellIds.end());
+        }
+
+        template <class T>
+        static bool ValidateSpellInfo(T const& spellIds)
+        {
+            return _ValidateSpellInfo(std::begin(spellIds), std::end(spellIds));
+        }
+
+    private:
+        template<typename Iterator>
+        static bool _ValidateSpellInfo(Iterator begin, Iterator end)
+        {
+            bool allValid = true;
+            while (begin != end)
+            {
+                if (!_ValidateSpellInfo(*begin))
+                    allValid = false;
+
+                ++begin;
+            }
+            return allValid;
+        }
+
+        static bool _ValidateSpellInfo(uint32 spellId);
 };
 
 // SpellScript interface - enum used for runtime checks of script function calls
@@ -130,15 +467,18 @@ enum SpellScriptHookType
     SPELL_SCRIPT_HOOK_EFFECT_LAUNCH_TARGET,
     SPELL_SCRIPT_HOOK_EFFECT_HIT,
     SPELL_SCRIPT_HOOK_EFFECT_HIT_TARGET,
+    SPELL_SCRIPT_HOOK_EFFECT_SUCCESSFUL_DISPEL,
     SPELL_SCRIPT_HOOK_BEFORE_HIT,
     SPELL_SCRIPT_HOOK_HIT,
     SPELL_SCRIPT_HOOK_AFTER_HIT,
     SPELL_SCRIPT_HOOK_OBJECT_AREA_TARGET_SELECT,
     SPELL_SCRIPT_HOOK_OBJECT_TARGET_SELECT,
+    SPELL_SCRIPT_HOOK_DESTINATION_TARGET_SELECT,
     SPELL_SCRIPT_HOOK_CHECK_CAST,
     SPELL_SCRIPT_HOOK_BEFORE_CAST,
     SPELL_SCRIPT_HOOK_ON_CAST,
-    SPELL_SCRIPT_HOOK_AFTER_CAST
+    SPELL_SCRIPT_HOOK_AFTER_CAST,
+    SPELL_SCRIPT_HOOK_ON_SPELL_START
 };
 
 #define HOOK_SPELL_HIT_START SPELL_SCRIPT_HOOK_EFFECT_HIT
@@ -147,163 +487,114 @@ enum SpellScriptHookType
 #define HOOK_SPELL_END SPELL_SCRIPT_HOOK_CHECK_CAST + 1
 #define HOOK_SPELL_COUNT HOOK_SPELL_END - HOOK_SPELL_START
 
-class SpellScript : public _SpellScript
+class TC_GAME_API SpellScript : public _SpellScript
 {
     // internal use classes & functions
     // DO NOT OVERRIDE THESE IN SCRIPTS
     public:
-        #define SPELLSCRIPT_FUNCTION_TYPE_DEFINES(CLASSNAME) \
-            typedef SpellCastResult(CLASSNAME::*SpellCheckCastFnType)(); \
-            typedef void(CLASSNAME::*SpellEffectFnType)(SpellEffIndex); \
-            typedef void(CLASSNAME::*SpellHitFnType)(); \
-            typedef void(CLASSNAME::*SpellCastFnType)(); \
-            typedef void(CLASSNAME::*SpellObjectAreaTargetSelectFnType)(std::list<WorldObject*>&); \
-            typedef void(CLASSNAME::*SpellObjectTargetSelectFnType)(WorldObject*&);
+        
+        using CheckCastHook   = HookHandler<SpellCastResult>;
+        using EffectNameHook  = EffectNameHookHandler<void, SpellEffIndex>;
+        using HitHook         = HookHandler<void>;
+        using CastHook        = HookHandler<void>;
 
-        SPELLSCRIPT_FUNCTION_TYPE_DEFINES(SpellScript)
-
-        class CastHandler
-        {
-            public:
-                CastHandler(SpellCastFnType _pCastHandlerScript);
-                void Call(SpellScript* spellScript);
-            private:
-                SpellCastFnType pCastHandlerScript;
-        };
-
-        class CheckCastHandler
-        {
-            public:
-                CheckCastHandler(SpellCheckCastFnType checkCastHandlerScript);
-                SpellCastResult Call(SpellScript* spellScript);
-            private:
-                SpellCheckCastFnType _checkCastHandlerScript;
-        };
-
-        class EffectHandler : public  _SpellScript::EffectNameCheck, public _SpellScript::EffectHook
-        {
-            public:
-                EffectHandler(SpellEffectFnType _pEffectHandlerScript, uint8 _effIndex, uint16 _effName);
-                std::string ToString();
-                bool CheckEffect(SpellInfo const* spellEntry, uint8 effIndex);
-                void Call(SpellScript* spellScript, SpellEffIndex effIndex);
-            private:
-                SpellEffectFnType pEffectHandlerScript;
-        };
-
-        class HitHandler
-        {
-            public:
-                HitHandler(SpellHitFnType _pHitHandlerScript);
-                void Call(SpellScript* spellScript);
-            private:
-                SpellHitFnType pHitHandlerScript;
-        };
-
-        class TargetHook : public _SpellScript::EffectHook
-        {
-            public:
-                TargetHook(uint8 _effectIndex, uint16 _targetType, bool _area);
-                bool CheckEffect(SpellInfo const* spellEntry, uint8 effIndex);
-                std::string ToString();
-            protected:
-                uint16 targetType;
-                bool area;
-        };
-
-        class ObjectAreaTargetSelectHandler : public TargetHook
-        {
-            public:
-                ObjectAreaTargetSelectHandler(SpellObjectAreaTargetSelectFnType _pObjectAreaTargetSelectHandlerScript, uint8 _effIndex, uint16 _targetType);
-                void Call(SpellScript* spellScript, std::list<WorldObject*>& targets);
-            private:
-                SpellObjectAreaTargetSelectFnType pObjectAreaTargetSelectHandlerScript;
-        };
-
-        class ObjectTargetSelectHandler : public TargetHook
-        {
-            public:
-                ObjectTargetSelectHandler(SpellObjectTargetSelectFnType _pObjectTargetSelectHandlerScript, uint8 _effIndex, uint16 _targetType);
-                void Call(SpellScript* spellScript, WorldObject*& targets);
-            private:
-                SpellObjectTargetSelectFnType pObjectTargetSelectHandlerScript;
-        };
-
-        #define SPELLSCRIPT_FUNCTION_CAST_DEFINES(CLASSNAME) \
-        class CastHandlerFunction : public SpellScript::CastHandler { public: CastHandlerFunction(SpellCastFnType _pCastHandlerScript) : SpellScript::CastHandler((SpellScript::SpellCastFnType)_pCastHandlerScript) {} }; \
-        class CheckCastHandlerFunction : public SpellScript::CheckCastHandler { public: CheckCastHandlerFunction(SpellCheckCastFnType _checkCastHandlerScript) : SpellScript::CheckCastHandler((SpellScript::SpellCheckCastFnType)_checkCastHandlerScript) {} }; \
-        class EffectHandlerFunction : public SpellScript::EffectHandler { public: EffectHandlerFunction(SpellEffectFnType _pEffectHandlerScript, uint8 _effIndex, uint16 _effName) : SpellScript::EffectHandler((SpellScript::SpellEffectFnType)_pEffectHandlerScript, _effIndex, _effName) {} }; \
-        class HitHandlerFunction : public SpellScript::HitHandler { public: HitHandlerFunction(SpellHitFnType _pHitHandlerScript) : SpellScript::HitHandler((SpellScript::SpellHitFnType)_pHitHandlerScript) {} }; \
-        class ObjectAreaTargetSelectHandlerFunction : public SpellScript::ObjectAreaTargetSelectHandler { public: ObjectAreaTargetSelectHandlerFunction(SpellObjectAreaTargetSelectFnType _pObjectAreaTargetSelectHandlerScript, uint8 _effIndex, uint16 _targetType) : SpellScript::ObjectAreaTargetSelectHandler((SpellScript::SpellObjectAreaTargetSelectFnType)_pObjectAreaTargetSelectHandlerScript, _effIndex, _targetType) {} }; \
-        class ObjectTargetSelectHandlerFunction : public SpellScript::ObjectTargetSelectHandler { public: ObjectTargetSelectHandlerFunction(SpellObjectTargetSelectFnType _pObjectTargetSelectHandlerScript, uint8 _effIndex, uint16 _targetType) : SpellScript::ObjectTargetSelectHandler((SpellScript::SpellObjectTargetSelectFnType)_pObjectTargetSelectHandlerScript, _effIndex, _targetType) {} };
-
-        #define PrepareSpellScript(CLASSNAME) SPELLSCRIPT_FUNCTION_TYPE_DEFINES(CLASSNAME) SPELLSCRIPT_FUNCTION_CAST_DEFINES(CLASSNAME)
     public:
-        bool _Validate(SpellInfo const* entry);
+        SpellScript()
+            : _SpellScript(), m_spell(nullptr), m_hitPreventEffectMask(0), m_hitPreventDefaultEffectMask(0),
+            OnSpellStart(this),
+            BeforeCast(this),
+            OnCast(this),
+            AfterCast(this),
+            OnCheckCast(this),
+            OnEffectLaunch(this), OnEffectLaunchTarget(this), OnEffectHit(this), OnEffectHitTarget(this), OnEffectSuccessfulDispel(this),
+            BeforeHit(this), OnHit(this), AfterHit(this),
+            OnObjectAreaTargetSelect(this), OnObjectTargetSelect(this), OnDestinationTargetSelect(this)
+        {
+        }
+
+        bool _Validate(SpellInfo const* entry) override;
         bool _Load(Spell* spell);
         void _InitHit();
-        bool _IsEffectPrevented(SpellEffIndex effIndex) { return m_hitPreventEffectMask & (1<<effIndex); }
-        bool _IsDefaultEffectPrevented(SpellEffIndex effIndex) { return m_hitPreventDefaultEffectMask & (1<<effIndex); }
+        bool _IsEffectPrevented(SpellEffIndex effIndex) { return (m_hitPreventEffectMask & (1 << effIndex)) != 0; }
+        bool _IsDefaultEffectPrevented(SpellEffIndex effIndex) { return (m_hitPreventDefaultEffectMask & (1 << effIndex)) != 0; }
         void _PrepareScriptCall(SpellScriptHookType hookType);
         void _FinishScriptCall();
         bool IsInCheckCastHook() const;
         bool IsInTargetHook() const;
+        bool IsInModifiableHook() const;
         bool IsInHitPhase() const;
         bool IsInEffectHook() const;
     private:
         Spell* m_spell;
         uint8 m_hitPreventEffectMask;
         uint8 m_hitPreventDefaultEffectMask;
-    public:
-        //
-        // SpellScript interface
-        // hooks to which you can attach your functions
-        //
-        // example: BeforeCast += SpellCastFn(class::function);
-        HookList<CastHandler> BeforeCast;
-        // example: OnCast += SpellCastFn(class::function);
-        HookList<CastHandler> OnCast;
-        // example: AfterCast += SpellCastFn(class::function);
-        HookList<CastHandler> AfterCast;
-        #define SpellCastFn(F) CastHandlerFunction(&F)
 
-        // example: OnCheckCast += SpellCheckCastFn();
-        // where function is SpellCastResult function()
-        HookList<CheckCastHandler> OnCheckCast;
-        #define SpellCheckCastFn(F) CheckCastHandlerFunction(&F)
+    public: // SpellScript interface - Cast hooks
 
-        // example: OnEffect**** += SpellEffectFn(class::function, EffectIndexSpecifier, EffectNameSpecifier);
-        // where function is void function(SpellEffIndex effIndex)
-        HookList<EffectHandler> OnEffectLaunch;
-        HookList<EffectHandler> OnEffectLaunchTarget;
-        HookList<EffectHandler> OnEffectHit;
-        HookList<EffectHandler> OnEffectHitTarget;
-        #define SpellEffectFn(F, I, N) EffectHandlerFunction(&F, I, N)
+        // OnSpellStart.Register(this, &class::function);
+        // Function is: void function();
+        CastHook::HookList OnSpellStart;
 
-        // example: BeforeHit += SpellHitFn(class::function);
-        HookList<HitHandler> BeforeHit;
-        // example: OnHit += SpellHitFn(class::function);
-        HookList<HitHandler> OnHit;
-        // example: AfterHit += SpellHitFn(class::function);
-        HookList<HitHandler> AfterHit;
-        // where function is: void function()
-        #define SpellHitFn(F) HitHandlerFunction(&F)
+        // BeforeCast.Register(this, &class::function);
+        // Function is: void function();
+        CastHook::HookList BeforeCast;
 
-        // example: OnObjectAreaTargetSelect += SpellObjectAreaTargetSelectFn(class::function, EffectIndexSpecifier, TargetsNameSpecifier);
-        // where function is void function(std::list<WorldObject*>& targets)
-        HookList<ObjectAreaTargetSelectHandler> OnObjectAreaTargetSelect;
-        #define SpellObjectAreaTargetSelectFn(F, I, N) ObjectAreaTargetSelectHandlerFunction(&F, I, N)
+        // OnCast.Register(this, &class::function);
+        // Function is: void function();
+        CastHook::HookList OnCast;
 
-        // example: OnObjectTargetSelect += SpellObjectTargetSelectFn(class::function, EffectIndexSpecifier, TargetsNameSpecifier);
-        // where function is void function(WorldObject*& target)
-        HookList<ObjectTargetSelectHandler> OnObjectTargetSelect;
-        #define SpellObjectTargetSelectFn(F, I, N) ObjectTargetSelectHandlerFunction(&F, I, N)
+        // AfterCast.Register(this, &class::function);
+        // Function is: void function();
+        CastHook::HookList AfterCast;
+
+        // OnCheckCast.Register(this, &class::function);
+        // Function is: SpellCastResult function()
+        CheckCastHook::HookList OnCheckCast;
+
+    public: // SpellScript interface - Effect hooks
+
+        // OnEffect****.Register(this, &class::function, EffectIndexSpecifier, EffectNameSpecifier);
+        // Function is: void function(SpellEffIndex effIndex);
+        EffectNameHook::HookList OnEffectLaunch;
+        EffectNameHook::HookList OnEffectLaunchTarget;
+        EffectNameHook::HookList OnEffectHit;
+        EffectNameHook::HookList OnEffectHitTarget;
+        EffectNameHook::HookList OnEffectSuccessfulDispel;
+
+    public: // SpellScript interface - Hit hooks
+
+        // BeforeHit.Register(this, class::function);
+        // Function is: void function()
+        HitHook::HookList BeforeHit;
+
+        // OnHit.Register(this, &class::function);
+        // Function is: void function()
+        HitHook::HookList OnHit;
+
+        // AfterHit.Register(this, &class::function);
+        // Function is: void function()
+        HitHook::HookList AfterHit;
+
+    public: // SpellScript interface - Target selection hooks
+
+        // OnObjectAreaTargetSelect.Register(this, &class::function, EffectIndexSpecifier, TargetsNameSpecifier);
+        // Function is: void function(std::list<WorldObject*>& targets)
+        ObjectAreaTargetSelectHookHandler::HookList OnObjectAreaTargetSelect;
+
+        // OnObjectTargetSelect.Register(this, &class::function, EffectIndexSpecifier, TargetsNameSpecifier);
+        // Function is: void function(WorldObject*& target)
+        ObjectTargetSelectHookHandler::HookList OnObjectTargetSelect;
+
+        // OnDestinationTargetSelect.Register(this, &class::function, EffectIndexSpecifier, TargetsNameSpecifier);
+        // Function is: void function(SpellDestination& target)
+        DestinationTargetSelectHookHandler::HookList OnDestinationTargetSelect;
 
         // hooks are executed in following order, at specified event of spell:
         // 1. BeforeCast - executed when spell preparation is finished (when cast bar becomes full) before cast is handled
         // 2. OnCheckCast - allows to override result of CheckCast function
         // 3a. OnObjectAreaTargetSelect - executed just before adding selected targets to final target list (for area targets)
         // 3b. OnObjectTargetSelect - executed just before adding selected target to final target list (for single unit targets)
+        // 3c. OnDestinationTargetSelect - executed just before adding selected target to final target list (for destination targets)
         // 4. OnCast - executed just before spell is launched (creates missile) or executed
         // 5. AfterCast - executed after spell missile is launched and immediate spell actions are done
         // 6. OnEffectLaunch - executed just before specified effect handler call - when spell missile is launched
@@ -314,14 +605,17 @@ class SpellScript : public _SpellScript
         // 11. OnHit - executed just before spell deals damage and procs auras - when spell hits target - called for each target from spell target map
         // 12. AfterHit - executed just after spell finishes all it's jobs for target - called for each target from spell target map
 
+        // this hook is only executed after a successful dispel of any aura
+        // OnEffectSuccessfulDispel - executed just after effect successfully dispelled aura(s)
+
         //
         // methods allowing interaction with Spell object
         //
         // methods useable during all spell handling phases
-        Unit* GetCaster();
-        Unit* GetOriginalCaster();
-        SpellInfo const* GetSpellInfo();
-        SpellValue const* GetSpellValue();
+        Unit* GetCaster() const;
+        Unit* GetOriginalCaster() const;
+        SpellInfo const* GetSpellInfo() const;
+        SpellValue const* GetSpellValue() const;
 
         // methods useable after spell is prepared
         // accessors to the explicit targets of the spell
@@ -329,54 +623,56 @@ class SpellScript : public _SpellScript
         // examples:
         // -shadowstep - explicit target is the unit you want to go behind of
         // -chain heal - explicit target is the unit to be healed first
-        // -holy nova/arcane explosion - explicit target = NULL because target you are selecting doesn't affect how spell targets are selected
+        // -holy nova/arcane explosion - explicit target = nullptr because target you are selecting doesn't affect how spell targets are selected
         // you can determine if spell requires explicit targets by dbc columns:
         // - Targets - mask of explicit target types
         // - ImplicitTargetXX set to TARGET_XXX_TARGET_YYY, _TARGET_ here means that explicit target is used by the effect, so spell needs one too
 
-        // returns: WorldLocation which was selected as a spell destination or NULL
-        WorldLocation const* GetExplTargetDest();
+        // returns: WorldLocation which was selected as a spell destination or nullptr
+        WorldLocation const* GetExplTargetDest() const;
 
         void SetExplTargetDest(WorldLocation& loc);
 
-        // returns: WorldObject which was selected as an explicit spell target or NULL if there's no target
-        WorldObject* GetExplTargetWorldObject();
+        // returns: WorldObject which was selected as an explicit spell target or nullptr if there's no target
+        WorldObject* GetExplTargetWorldObject() const;
 
-        // returns: Unit which was selected as an explicit spell target or NULL if there's no target
-        Unit* GetExplTargetUnit();
+        // returns: Unit which was selected as an explicit spell target or nullptr if there's no target
+        Unit* GetExplTargetUnit() const;
 
-        // returns: GameObject which was selected as an explicit spell target or NULL if there's no target
-        GameObject* GetExplTargetGObj();
+        // returns: GameObject which was selected as an explicit spell target or nullptr if there's no target
+        GameObject* GetExplTargetGObj() const;
 
-        // returns: Item which was selected as an explicit spell target or NULL if there's no target
-        Item* GetExplTargetItem();
+        // returns: Item which was selected as an explicit spell target or nullptr if there's no target
+        Item* GetExplTargetItem() const;
 
         // methods useable only during spell hit on target, or during spell launch on target:
-        // returns: target of current effect if it was Unit otherwise NULL
-        Unit* GetHitUnit();
-        // returns: target of current effect if it was Creature otherwise NULL
-        Creature* GetHitCreature();
-        // returns: target of current effect if it was Player otherwise NULL
-        Player* GetHitPlayer();
-        // returns: target of current effect if it was Item otherwise NULL
-        Item* GetHitItem();
-        // returns: target of current effect if it was GameObject otherwise NULL
-        GameObject* GetHitGObj();
+        // returns: target of current effect if it was Unit otherwise nullptr
+        Unit* GetHitUnit() const;
+        // returns: target of current effect if it was Creature otherwise nullptr
+        Creature* GetHitCreature() const;
+        // returns: target of current effect if it was Player otherwise nullptr
+        Player* GetHitPlayer() const;
+        // returns: target of current effect if it was Item otherwise nullptr
+        Item* GetHitItem() const;
+        // returns: target of current effect if it was GameObject otherwise nullptr
+        GameObject* GetHitGObj() const;
+        // returns: target of current effect if it was Corpse otherwise nullptr
+        Corpse* GetHitCorpse() const;
         // returns: destination of current effect
-        WorldLocation* GetHitDest();
+        WorldLocation* GetHitDest() const;
         // setter/getter for for damage done by spell to target of spell hit
         // returns damage calculated before hit, and real dmg done after hit
-        int32 GetHitDamage();
+        int32 GetHitDamage() const;
         void SetHitDamage(int32 damage);
         void PreventHitDamage() { SetHitDamage(0); }
         // setter/getter for for heal done by spell to target of spell hit
         // returns healing calculated before hit, and real dmg done after hit
-        int32 GetHitHeal();
+        int32 GetHitHeal() const;
         void SetHitHeal(int32 heal);
         void PreventHitHeal() { SetHitHeal(0); }
-        Spell* GetSpell() { return m_spell; }
+        Spell* GetSpell() const { return m_spell; }
         // returns current spell hit target aura
-        Aura* GetHitAura();
+        Aura* GetHitAura() const;
         // prevents applying aura on current spell hit target
         void PreventHitAura();
 
@@ -392,19 +688,20 @@ class SpellScript : public _SpellScript
         void PreventHitDefaultEffect(SpellEffIndex effIndex);
 
         // method avalible only in EffectHandler method
-        int32 GetEffectValue();
+        int32 GetEffectValue() const;
+        void SetEffectValue(int32 value);
 
         // returns: cast item if present.
-        Item* GetCastItem();
+        Item* GetCastItem() const;
 
         // Creates item. Calls Spell::DoCreateItem method.
         void CreateItem(uint32 effIndex, uint32 itemId);
 
         // Returns SpellInfo from the spell that triggered the current one
-        SpellInfo const* GetTriggeringSpell();
+        SpellInfo const* GetTriggeringSpell() const;
 
         // finishes spellcast prematurely with selected error message
-        void FinishCast(SpellCastResult result);
+        void FinishCast(SpellCastResult result, uint32* param1 = nullptr, uint32* param2 = nullptr);
 
         void SetCustomCastResultMessage(SpellCustomErrors result);
 };
@@ -428,152 +725,158 @@ enum AuraScriptHookType
     AURA_SCRIPT_HOOK_EFFECT_SPLIT,
     AURA_SCRIPT_HOOK_CHECK_AREA_TARGET,
     AURA_SCRIPT_HOOK_DISPEL,
-    AURA_SCRIPT_HOOK_AFTER_DISPEL
+    AURA_SCRIPT_HOOK_AFTER_DISPEL,
+    // Spell Proc Hooks
+    AURA_SCRIPT_HOOK_CHECK_PROC,
+    AURA_SCRIPT_HOOK_CHECK_EFFECT_PROC,
+    AURA_SCRIPT_HOOK_PREPARE_PROC,
+    AURA_SCRIPT_HOOK_PROC,
+    AURA_SCRIPT_HOOK_EFFECT_PROC,
+    AURA_SCRIPT_HOOK_EFFECT_AFTER_PROC,
+    AURA_SCRIPT_HOOK_AFTER_PROC,
     /*AURA_SCRIPT_HOOK_APPLY,
     AURA_SCRIPT_HOOK_REMOVE, */
 };
+
+/*
 #define HOOK_AURA_EFFECT_START HOOK_AURA_EFFECT_APPLY
 #define HOOK_AURA_EFFECT_END HOOK_AURA_EFFECT_CALC_SPELLMOD + 1
 #define HOOK_AURA_EFFECT_COUNT HOOK_AURA_EFFECT_END - HOOK_AURA_EFFECT_START
-
-class AuraScript : public _SpellScript
+*/
+class TC_GAME_API AuraScript : public _SpellScript
 {
     // internal use classes & functions
     // DO NOT OVERRIDE THESE IN SCRIPTS
     public:
 
-    #define AURASCRIPT_FUNCTION_TYPE_DEFINES(CLASSNAME) \
-        typedef bool(CLASSNAME::*AuraCheckAreaTargetFnType)(Unit* target); \
-        typedef void(CLASSNAME::*AuraDispelFnType)(DispelInfo* dispelInfo); \
-        typedef void(CLASSNAME::*AuraEffectApplicationModeFnType)(AuraEffect const*, AuraEffectHandleModes); \
-        typedef void(CLASSNAME::*AuraEffectPeriodicFnType)(AuraEffect const*); \
-        typedef void(CLASSNAME::*AuraEffectUpdatePeriodicFnType)(AuraEffect*); \
-        typedef void(CLASSNAME::*AuraEffectCalcAmountFnType)(AuraEffect const*, int32 &, bool &); \
-        typedef void(CLASSNAME::*AuraEffectCalcPeriodicFnType)(AuraEffect const*, bool &, int32 &); \
-        typedef void(CLASSNAME::*AuraEffectCalcSpellModFnType)(AuraEffect const*, SpellModifier* &); \
-        typedef void(CLASSNAME::*AuraEffectAbsorbFnType)(AuraEffect*, DamageInfo &, uint32 &); \
-        typedef void(CLASSNAME::*AuraEffectSplitFnType)(AuraEffect*, DamageInfo &, uint32 &); \
+        using AuraCheckAreaTargetHookHandler      = HookHandler<bool, Unit*>;
+        using AuraDispelHookHandler               = HookHandler<void, DispelInfo*>;
+        using AuraEffectPeriodicHookHandler       = AuraNameHookHandler<void, AuraEffect const*>;
+        using AuraEffectUpdatePeriodicHookHandler = AuraNameHookHandler<void, AuraEffect*>;
+        using AuraEffectCalcAmountHookHandler     = AuraNameHookHandler<void, AuraEffect const*, int32&, bool&>;
+        using AuraEffectCalcPeriodicHookHandler   = AuraNameHookHandler<void, AuraEffect const*, bool&, int32&>;
+        using AuraEffectCalcSpellModHookHandler   = AuraNameHookHandler<void, AuraEffect const*, SpellModifier*&>;
 
-        AURASCRIPT_FUNCTION_TYPE_DEFINES(AuraScript)
+        template <typename R, typename... Args>
+        struct TC_GAME_API AuraEffectHandleModeHookHandler : AuraNameHookHandler<R, Args...>
+        {
+            //> Base type shorthand.
+            using BaseHookHandler = AuraNameHookHandler<R, Args...>;
 
-        class CheckAreaTargetHandler
-        {
-            public:
-                CheckAreaTargetHandler(AuraCheckAreaTargetFnType pHandlerScript);
-                bool Call(AuraScript* auraScript, Unit* target);
-            private:
-                AuraCheckAreaTargetFnType pHandlerScript;
-        };
-        class AuraDispelHandler
-        {
-            public:
-                AuraDispelHandler(AuraDispelFnType pHandlerScript);
-                void Call(AuraScript* auraScript, DispelInfo* dispelInfo);
-            private:
-                AuraDispelFnType pHandlerScript;
-        };
-        class EffectBase : public  _SpellScript::EffectAuraNameCheck, public _SpellScript::EffectHook
-        {
-            public:
-                EffectBase(uint8 _effIndex, uint16 _effName);
-                std::string ToString();
-                bool CheckEffect(SpellInfo const* spellEntry, uint8 effIndex);
-        };
-        class EffectPeriodicHandler : public EffectBase
-        {
-            public:
-                EffectPeriodicHandler(AuraEffectPeriodicFnType _pEffectHandlerScript, uint8 _effIndex, uint16 _effName);
-                void Call(AuraScript* auraScript, AuraEffect const* _aurEff);
-            private:
-                AuraEffectPeriodicFnType pEffectHandlerScript;
-        };
-        class EffectUpdatePeriodicHandler : public EffectBase
-        {
-            public:
-                EffectUpdatePeriodicHandler(AuraEffectUpdatePeriodicFnType _pEffectHandlerScript, uint8 _effIndex, uint16 _effName);
-                void Call(AuraScript* auraScript, AuraEffect* aurEff);
-            private:
-                AuraEffectUpdatePeriodicFnType pEffectHandlerScript;
-        };
-        class EffectCalcAmountHandler : public EffectBase
-        {
-            public:
-                EffectCalcAmountHandler(AuraEffectCalcAmountFnType _pEffectHandlerScript, uint8 _effIndex, uint16 _effName);
-                void Call(AuraScript* auraScript, AuraEffect const* aurEff, int32 & amount, bool & canBeRecalculated);
-            private:
-                AuraEffectCalcAmountFnType pEffectHandlerScript;
-        };
-        class EffectCalcPeriodicHandler : public EffectBase
-        {
-            public:
-                EffectCalcPeriodicHandler(AuraEffectCalcPeriodicFnType _pEffectHandlerScript, uint8 _effIndex, uint16 _effName);
-                void Call(AuraScript* auraScript, AuraEffect const* aurEff, bool & isPeriodic, int32 & periodicTimer);
-            private:
-                AuraEffectCalcPeriodicFnType pEffectHandlerScript;
-        };
-        class EffectCalcSpellModHandler : public EffectBase
-        {
-            public:
-                EffectCalcSpellModHandler(AuraEffectCalcSpellModFnType _pEffectHandlerScript, uint8 _effIndex, uint16 _effName);
-                void Call(AuraScript* auraScript, AuraEffect const* aurEff, SpellModifier* & spellMod);
-            private:
-                AuraEffectCalcSpellModFnType pEffectHandlerScript;
-        };
-        class EffectApplyHandler : public EffectBase
-        {
-            public:
-                EffectApplyHandler(AuraEffectApplicationModeFnType _pEffectHandlerScript, uint8 _effIndex, uint16 _effName, AuraEffectHandleModes _mode);
-                void Call(AuraScript* auraScript, AuraEffect const* _aurEff, AuraEffectHandleModes _mode);
-            private:
-                AuraEffectApplicationModeFnType pEffectHandlerScript;
-                AuraEffectHandleModes mode;
-        };
-        class EffectAbsorbHandler : public EffectBase
-        {
-            public:
-                EffectAbsorbHandler(AuraEffectAbsorbFnType _pEffectHandlerScript, uint8 _effIndex);
-                void Call(AuraScript* auraScript, AuraEffect* aurEff, DamageInfo & dmgInfo, uint32 & absorbAmount);
-            private:
-                AuraEffectAbsorbFnType pEffectHandlerScript;
-        };
-        class EffectManaShieldHandler : public EffectBase
-        {
-            public:
-                EffectManaShieldHandler(AuraEffectAbsorbFnType _pEffectHandlerScript, uint8 _effIndex);
-                void Call(AuraScript* auraScript, AuraEffect* aurEff, DamageInfo & dmgInfo, uint32 & absorbAmount);
-            private:
-                AuraEffectAbsorbFnType pEffectHandlerScript;
-        };
-        class EffectSplitHandler : public EffectBase
-        {
-            public:
-                EffectSplitHandler(AuraEffectSplitFnType _pEffectHandlerScript, uint8 _effIndex);
-                void Call(AuraScript* auraScript, AuraEffect* aurEff, DamageInfo & dmgInfo, uint32 & splitAmount);
-            private:
-                AuraEffectSplitFnType pEffectHandlerScript;
+            //> Type of the required function pointer.
+            template <typename T>
+            using HookType = typename BaseHookHandler::template HookType<T>;
+
+            //> Type of the hook container list.
+            using HookList = _HookList<AuraEffectHandleModeHookHandler<R, Args...>, SpellEffIndex, uint16, AuraEffectHandleModes>;
+
+            template <typename Derived = _SpellScript>
+            AuraEffectHandleModeHookHandler(Derived* owner, HookType<Derived> hookFunction, uint8 effIndex, uint16 auraName, AuraEffectHandleModes mode)
+                : BaseHookHandler(owner, hookFunction, effIndex, auraName), _mode(mode)
+            {
+
+            }
+
+            //> Disable the other implementation.
+            bool Filter(SpellInfo const* /*spellInfo*/, SpellEffIndex /*effIndex*/) = delete;
+
+            //> Contractual implementation, see HookHandler::Filtered
+            bool Filter(SpellInfo const* spellInfo, SpellEffIndex effIndex, AuraEffectHandleModes mode)
+            {
+                if (!(mode & _mode))
+                    return false;
+
+                return BaseHookHandler::Filter(spellInfo, effIndex);
+            }
+
+        private:
+            AuraEffectHandleModes _mode;
         };
 
-        #define AURASCRIPT_FUNCTION_CAST_DEFINES(CLASSNAME) \
-        class CheckAreaTargetFunction : public AuraScript::CheckAreaTargetHandler { public: CheckAreaTargetFunction(AuraCheckAreaTargetFnType _pHandlerScript) : AuraScript::CheckAreaTargetHandler((AuraScript::AuraCheckAreaTargetFnType)_pHandlerScript) {} }; \
-        class AuraDispelFunction : public AuraScript::AuraDispelHandler { public: AuraDispelFunction(AuraDispelFnType _pHandlerScript) : AuraScript::AuraDispelHandler((AuraScript::AuraDispelFnType)_pHandlerScript) {} }; \
-        class EffectPeriodicHandlerFunction : public AuraScript::EffectPeriodicHandler { public: EffectPeriodicHandlerFunction(AuraEffectPeriodicFnType _pEffectHandlerScript, uint8 _effIndex, uint16 _effName) : AuraScript::EffectPeriodicHandler((AuraScript::AuraEffectPeriodicFnType)_pEffectHandlerScript, _effIndex, _effName) {} }; \
-        class EffectUpdatePeriodicHandlerFunction : public AuraScript::EffectUpdatePeriodicHandler { public: EffectUpdatePeriodicHandlerFunction(AuraEffectUpdatePeriodicFnType _pEffectHandlerScript, uint8 _effIndex, uint16 _effName) : AuraScript::EffectUpdatePeriodicHandler((AuraScript::AuraEffectUpdatePeriodicFnType)_pEffectHandlerScript, _effIndex, _effName) {} }; \
-        class EffectCalcAmountHandlerFunction : public AuraScript::EffectCalcAmountHandler { public: EffectCalcAmountHandlerFunction(AuraEffectCalcAmountFnType _pEffectHandlerScript, uint8 _effIndex, uint16 _effName) : AuraScript::EffectCalcAmountHandler((AuraScript::AuraEffectCalcAmountFnType)_pEffectHandlerScript, _effIndex, _effName) {} }; \
-        class EffectCalcPeriodicHandlerFunction : public AuraScript::EffectCalcPeriodicHandler { public: EffectCalcPeriodicHandlerFunction(AuraEffectCalcPeriodicFnType _pEffectHandlerScript, uint8 _effIndex, uint16 _effName) : AuraScript::EffectCalcPeriodicHandler((AuraScript::AuraEffectCalcPeriodicFnType)_pEffectHandlerScript, _effIndex, _effName) {} }; \
-        class EffectCalcSpellModHandlerFunction : public AuraScript::EffectCalcSpellModHandler { public: EffectCalcSpellModHandlerFunction(AuraEffectCalcSpellModFnType _pEffectHandlerScript, uint8 _effIndex, uint16 _effName) : AuraScript::EffectCalcSpellModHandler((AuraScript::AuraEffectCalcSpellModFnType)_pEffectHandlerScript, _effIndex, _effName) {} }; \
-        class EffectApplyHandlerFunction : public AuraScript::EffectApplyHandler { public: EffectApplyHandlerFunction(AuraEffectApplicationModeFnType _pEffectHandlerScript, uint8 _effIndex, uint16 _effName, AuraEffectHandleModes _mode) : AuraScript::EffectApplyHandler((AuraScript::AuraEffectApplicationModeFnType)_pEffectHandlerScript, _effIndex, _effName, _mode) {} }; \
-        class EffectAbsorbFunction : public AuraScript::EffectAbsorbHandler { public: EffectAbsorbFunction(AuraEffectAbsorbFnType _pEffectHandlerScript, uint8 _effIndex) : AuraScript::EffectAbsorbHandler((AuraScript::AuraEffectAbsorbFnType)_pEffectHandlerScript, _effIndex) {} }; \
-        class EffectManaShieldFunction : public AuraScript::EffectManaShieldHandler { public: EffectManaShieldFunction(AuraEffectAbsorbFnType _pEffectHandlerScript, uint8 _effIndex) : AuraScript::EffectManaShieldHandler((AuraScript::AuraEffectAbsorbFnType)_pEffectHandlerScript, _effIndex) {} }; \
-        class EffectSplitFunction : public AuraScript::EffectSplitHandler { public: EffectSplitFunction(AuraEffectSplitFnType _pEffectHandlerScript, uint8 _effIndex) : AuraScript::EffectSplitHandler((AuraScript::AuraEffectSplitFnType)_pEffectHandlerScript, _effIndex) {} }; \
+        using AuraEffectApplyHookHandler = AuraEffectHandleModeHookHandler<void, AuraEffect const*, AuraEffectHandleModes>;
+        
+        struct TC_GAME_API AuraEffectAbsorbHookHandler : AuraNameHookHandler<void, AuraEffect*, DamageInfo&, uint32&>
+        {
+            //> Base type shorthand.
+            using BaseHookHandler = AuraNameHookHandler<void, AuraEffect*, DamageInfo&, uint32&>;
 
-        #define PrepareAuraScript(CLASSNAME) AURASCRIPT_FUNCTION_TYPE_DEFINES(CLASSNAME) AURASCRIPT_FUNCTION_CAST_DEFINES(CLASSNAME)
+            //> Type of the required function pointer.
+            template <typename T>
+            using HookType = typename BaseHookHandler::template HookType<T>;
+
+            //> Type of the hook container list.
+            using HookList = _HookList<AuraEffectAbsorbHookHandler, uint8>;
+
+            template <typename Derived = _SpellScript>
+            AuraEffectAbsorbHookHandler(Derived* owner, HookType<Derived> hookFunction, uint8 effIndex)
+                : BaseHookHandler(owner, hookFunction, effIndex, SPELL_AURA_SCHOOL_ABSORB)
+            {
+            }
+        };
+
+        struct TC_GAME_API AuraEffectManaShieldHookHandler : AuraNameHookHandler<void, AuraEffect*, DamageInfo&, uint32&>
+        {
+            //> Base type shorthand.
+            using BaseHookHandler = AuraNameHookHandler<void, AuraEffect*, DamageInfo&, uint32&>;
+
+            //> Type of the required function pointer.
+            template <typename T>
+            using HookType = typename BaseHookHandler::template HookType<T>;
+
+            //> Type of the hook container list.
+            using HookList = _HookList<AuraEffectManaShieldHookHandler, uint8>;
+
+            template <typename Derived = _SpellScript>
+            AuraEffectManaShieldHookHandler(Derived* owner, HookType<Derived> hookFunction, uint8 effIndex)
+                : BaseHookHandler(owner, hookFunction, effIndex, SPELL_AURA_MANA_SHIELD)
+            {
+            }
+        };
+
+        struct TC_GAME_API AuraEffectSplitHookHandler : AuraNameHookHandler<void, AuraEffect*, DamageInfo&, uint32&>
+        {
+            //> Base type shorthand.
+            using BaseHookHandler = AuraNameHookHandler<void, AuraEffect*, DamageInfo&, uint32&>;
+
+            //> Type of the required function pointer.
+            template <typename T>
+            using HookType = typename BaseHookHandler::template HookType<T>;
+
+            //> Type of the hook container list
+            using HookList = _HookList<AuraEffectSplitHookHandler, uint8>;
+
+            template <typename Derived = _SpellScript>
+            AuraEffectSplitHookHandler(Derived* owner, HookType<Derived> hookFunction, uint8 effIndex)
+                : BaseHookHandler(owner, hookFunction, effIndex, SPELL_AURA_SPLIT_DAMAGE_PCT)
+            {
+            }
+        };
+
+        using AuraCheckProcHookHandler            = HookHandler<bool, ProcEventInfo&>;
+        using AuraEffectCheckProcHookHandler      = AuraNameHookHandler<bool, AuraEffect const*, ProcEventInfo&>;
+        using AuraProcHookHandler                 = HookHandler<void, ProcEventInfo&>;
+        using AuraEffectProcHookHandler           = AuraNameHookHandler<void, AuraEffect const*, ProcEventInfo&>;
 
     public:
-        AuraScript() : _SpellScript(), m_aura(NULL), m_auraApplication(NULL), m_defaultActionPrevented(false)
-        {}
-        bool _Validate(SpellInfo const* entry);
+        AuraScript()
+            : _SpellScript(), m_aura(nullptr), m_auraApplication(nullptr), m_defaultActionPrevented(false),
+            DoCheckAreaTarget(this),
+            OnDispel(this), AfterDispel(this),
+            OnEffectApply(this), AfterEffectApply(this),
+            OnEffectRemove(this), AfterEffectRemove(this),
+            OnEffectPeriodic(this), OnEffectUpdatePeriodic(this),
+            DoEffectCalcAmount(this), DoEffectCalcPeriodic(this), DoEffectCalcSpellMod(this),
+            OnEffectAbsorb(this), AfterEffectAbsorb(this),
+            OnEffectManaShield(this), AfterEffectManaShield(this),
+            OnEffectSplit(this),
+            DoCheckProc(this), DoCheckEffectProc(this),
+            DoPrepareProc(this), OnProc(this), AfterProc(this),
+            OnEffectProc(this), AfterEffectProc(this)
+        {
+        }
+        bool _Validate(SpellInfo const* entry) override;
         bool _Load(Aura* aura);
-        void _PrepareScriptCall(AuraScriptHookType hookType, AuraApplication const* aurApp = NULL);
+        void _PrepareScriptCall(AuraScriptHookType hookType, AuraApplication const* aurApp = nullptr);
         void _FinishScriptCall();
         bool _IsDefaultActionPrevented();
     private:
@@ -581,7 +884,7 @@ class AuraScript : public _SpellScript
         AuraApplication const* m_auraApplication;
         bool m_defaultActionPrevented;
 
-        class ScriptStateStore
+        class TC_GAME_API ScriptStateStore
         {
         public:
             AuraApplication const* _auraApplication;
@@ -589,7 +892,7 @@ class AuraScript : public _SpellScript
             bool _defaultActionPrevented;
             ScriptStateStore(uint8 currentScriptState, AuraApplication const* auraApplication, bool defaultActionPrevented)
                 : _auraApplication(auraApplication), _currentScriptState(currentScriptState), _defaultActionPrevented(defaultActionPrevented)
-            {}
+            { }
         };
         typedef std::stack<ScriptStateStore> ScriptStateStack;
         ScriptStateStack m_scriptStates;
@@ -599,101 +902,123 @@ class AuraScript : public _SpellScript
         // AuraScript interface
         // hooks to which you can attach your functions
         //
+
         // executed when area aura checks if it can be applied on target
-        // example: OnEffectApply += AuraEffectApplyFn(class::function);
+        // example: OnEffectApply.Register(this, &class::function);
         // where function is: bool function (Unit* target);
-        HookList<CheckAreaTargetHandler> DoCheckAreaTarget;
-        #define AuraCheckAreaTargetFn(F) CheckAreaTargetFunction(&F)
+        AuraCheckAreaTargetHookHandler::HookList DoCheckAreaTarget;
 
         // executed when aura is dispelled by a unit
-        // example: OnDispel += AuraDispelFn(class::function);
+        // example: OnDispel.Register(this, &class::function);
         // where function is: void function (DispelInfo* dispelInfo);
-        HookList<AuraDispelHandler> OnDispel;
+        AuraDispelHookHandler::HookList OnDispel;
         // executed after aura is dispelled by a unit
-        // example: AfterDispel += AuraDispelFn(class::function);
+        // example: AfterDispel.Register(this, &class::function);
         // where function is: void function (DispelInfo* dispelInfo);
-        HookList<AuraDispelHandler> AfterDispel;
-        #define AuraDispelFn(F) AuraDispelFunction(&F)
+        AuraDispelHookHandler::HookList AfterDispel;
 
         // executed when aura effect is applied with specified mode to target
         // should be used when when effect handler preventing/replacing is needed, do not use this hook for triggering spellcasts/removing auras etc - may be unsafe
-        // example: OnEffectApply += AuraEffectApplyFn(class::function, EffectIndexSpecifier, EffectAuraNameSpecifier, AuraEffectHandleModes);
+        // example: OnEffectApply.Register(this, &class::function, EffectIndexSpecifier, EffectAuraNameSpecifier);
         // where function is: void function (AuraEffect const* aurEff, AuraEffectHandleModes mode);
-        HookList<EffectApplyHandler> OnEffectApply;
+        AuraEffectApplyHookHandler::HookList OnEffectApply;
         // executed after aura effect is applied with specified mode to target
-        // example: AfterEffectApply += AuraEffectApplyFn(class::function, EffectIndexSpecifier, EffectAuraNameSpecifier, AuraEffectHandleModes);
+        // example: AfterEffectApply.Register(this, &class::function, EffectIndexSpecifier, EffectAuraNameSpecifier);
         // where function is: void function (AuraEffect const* aurEff, AuraEffectHandleModes mode);
-        HookList<EffectApplyHandler> AfterEffectApply;
-        #define AuraEffectApplyFn(F, I, N, M) EffectApplyHandlerFunction(&F, I, N, M)
+        AuraEffectApplyHookHandler::HookList AfterEffectApply;
 
         // executed after aura effect is removed with specified mode from target
         // should be used when when effect handler preventing/replacing is needed, do not use this hook for triggering spellcasts/removing auras etc - may be unsafe
-        // example: OnEffectRemove += AuraEffectRemoveFn(class::function, EffectIndexSpecifier, EffectAuraNameSpecifier, AuraEffectHandleModes);
+        // example: OnEffectRemove.Register(this, &class::function, EffectIndexSpecifier, EffectAuraNameSpecifier);
+        // example: OnEffectRemove.Register(this, &class::function, EffectIndexSpecifier, EffectAuraNameSpecifier, AuraEffectHandleModes);
         // where function is: void function (AuraEffect const* aurEff, AuraEffectHandleModes mode);
-        HookList<EffectApplyHandler> OnEffectRemove;
+        AuraEffectApplyHookHandler::HookList OnEffectRemove;
         // executed when aura effect is removed with specified mode from target
-        // example: AfterEffectRemove += AuraEffectRemoveFn(class::function, EffectIndexSpecifier, EffectAuraNameSpecifier, AuraEffectHandleModes);
+        // example: AfterEffectRemove.Register(this, &class::function, EffectIndexSpecifier, EffectAuraNameSpecifier);
         // where function is: void function (AuraEffect const* aurEff, AuraEffectHandleModes mode);
-        HookList<EffectApplyHandler> AfterEffectRemove;
-        #define AuraEffectRemoveFn(F, I, N, M) EffectApplyHandlerFunction(&F, I, N, M)
+        AuraEffectApplyHookHandler::HookList AfterEffectRemove;
 
         // executed when periodic aura effect ticks on target
-        // example: OnEffectPeriodic += AuraEffectPeriodicFn(class::function, EffectIndexSpecifier, EffectAuraNameSpecifier);
+        // example: OnEffectPeriodic.Register(this, &class::function, EffectIndexSpecifier, EffectAuraNameSpecifier);
         // where function is: void function (AuraEffect const* aurEff);
-        HookList<EffectPeriodicHandler> OnEffectPeriodic;
-        #define AuraEffectPeriodicFn(F, I, N) EffectPeriodicHandlerFunction(&F, I, N)
+        AuraEffectPeriodicHookHandler::HookList OnEffectPeriodic;
 
         // executed when periodic aura effect is updated
-        // example: OnEffectUpdatePeriodic += AuraEffectUpdatePeriodicFn(class::function, EffectIndexSpecifier, EffectAuraNameSpecifier);
+        // example: OnEffectUpdatePeriodic.Register(this, &class::function, EffectIndexSpecifier, EffectAuraNameSpecifier);
         // where function is: void function (AuraEffect* aurEff);
-        HookList<EffectUpdatePeriodicHandler> OnEffectUpdatePeriodic;
-        #define AuraEffectUpdatePeriodicFn(F, I, N) EffectUpdatePeriodicHandlerFunction(&F, I, N)
+        AuraEffectUpdatePeriodicHookHandler::HookList OnEffectUpdatePeriodic;
 
         // executed when aura effect calculates amount
-        // example: DoEffectCalcAmount += AuraEffectCalcAmounFn(class::function, EffectIndexSpecifier, EffectAuraNameSpecifier);
+        // example: DoEffectCalcAmount.Register(this, &class::function, EffectIndexSpecifier, EffectAuraNameSpecifier);
         // where function is: void function (AuraEffect* aurEff, int32& amount, bool& canBeRecalculated);
-        HookList<EffectCalcAmountHandler> DoEffectCalcAmount;
-        #define AuraEffectCalcAmountFn(F, I, N) EffectCalcAmountHandlerFunction(&F, I, N)
+        AuraEffectCalcAmountHookHandler::HookList DoEffectCalcAmount;
 
         // executed when aura effect calculates periodic data
-        // example: DoEffectCalcPeriodic += AuraEffectCalcPeriodicFn(class::function, EffectIndexSpecifier, EffectAuraNameSpecifier);
+        // example: DoEffectCalcPeriodic.Register(this, &class::function, EffectIndexSpecifier, EffectAuraNameSpecifier);
         // where function is: void function (AuraEffect const* aurEff, bool& isPeriodic, int32& amplitude);
-        HookList<EffectCalcPeriodicHandler> DoEffectCalcPeriodic;
-        #define AuraEffectCalcPeriodicFn(F, I, N) EffectCalcPeriodicHandlerFunction(&F, I, N)
+        AuraEffectCalcPeriodicHookHandler::HookList DoEffectCalcPeriodic;
 
         // executed when aura effect calculates spellmod
-        // example: DoEffectCalcSpellMod += AuraEffectCalcSpellModFn(class::function, EffectIndexSpecifier, EffectAuraNameSpecifier);
+        // example: DoEffectCalcSpellMod.Register(this, &class::function, EffectIndexSpecifier, EffectAuraNameSpecifier);
         // where function is: void function (AuraEffect const* aurEff, SpellModifier*& spellMod);
-        HookList<EffectCalcSpellModHandler> DoEffectCalcSpellMod;
-        #define AuraEffectCalcSpellModFn(F, I, N) EffectCalcSpellModHandlerFunction(&F, I, N)
+        AuraEffectCalcSpellModHookHandler::HookList DoEffectCalcSpellMod;
 
         // executed when absorb aura effect is going to reduce damage
-        // example: OnEffectAbsorb += AuraEffectAbsorbFn(class::function, EffectIndexSpecifier);
+        // example: OnEffectAbsorb.Register(this, &class::function, EffectIndexSpecifier);
         // where function is: void function (AuraEffect const* aurEff, DamageInfo& dmgInfo, uint32& absorbAmount);
-        HookList<EffectAbsorbHandler> OnEffectAbsorb;
-        #define AuraEffectAbsorbFn(F, I) EffectAbsorbFunction(&F, I)
+        AuraEffectAbsorbHookHandler::HookList OnEffectAbsorb;
 
         // executed after absorb aura effect reduced damage to target - absorbAmount is real amount absorbed by aura
-        // example: AfterEffectAbsorb += AuraEffectAbsorbFn(class::function, EffectIndexSpecifier);
+        // example: AfterEffectAbsorb.Register(this, &class::function, EffectIndexSpecifier);
         // where function is: void function (AuraEffect* aurEff, DamageInfo& dmgInfo, uint32& absorbAmount);
-        HookList<EffectAbsorbHandler> AfterEffectAbsorb;
+        AuraEffectAbsorbHookHandler::HookList AfterEffectAbsorb;
 
         // executed when mana shield aura effect is going to reduce damage
-        // example: OnEffectManaShield += AuraEffectAbsorbFn(class::function, EffectIndexSpecifier);
+        // example: OnEffectManaShield.Register(this, &class::function, EffectIndexSpecifier);
         // where function is: void function (AuraEffect* aurEff, DamageInfo& dmgInfo, uint32& absorbAmount);
-        HookList<EffectManaShieldHandler> OnEffectManaShield;
-        #define AuraEffectManaShieldFn(F, I) EffectManaShieldFunction(&F, I)
+        AuraEffectManaShieldHookHandler::HookList OnEffectManaShield;
 
         // executed after mana shield aura effect reduced damage to target - absorbAmount is real amount absorbed by aura
-        // example: AfterEffectManaShield += AuraEffectAbsorbFn(class::function, EffectIndexSpecifier);
+        // example: AfterEffectManaShield.Register(this, &class::function, EffectIndexSpecifier);
         // where function is: void function (AuraEffect* aurEff, DamageInfo& dmgInfo, uint32& absorbAmount);
-        HookList<EffectManaShieldHandler> AfterEffectManaShield;
+        AuraEffectManaShieldHookHandler::HookList AfterEffectManaShield;
 
         // executed when the caster of some spell with split dmg aura gets damaged through it
-        // example: OnEffectSplit += AuraEffectSplitFn(class::function, EffectIndexSpecifier);
+        // example: OnEffectSplit.Register(this, &class::function, EffectIndexSpecifier);
         // where function is: void function (AuraEffect* aurEff, DamageInfo& dmgInfo, uint32& splitAmount);
-        HookList<EffectSplitHandler> OnEffectSplit;
-        #define AuraEffectSplitFn(F, I) EffectSplitFunction(&F, I)
+        AuraEffectSplitHookHandler::HookList OnEffectSplit;
+
+        // executed when aura checks if it can proc
+        // example: DoCheckProc.Register(this, &class::function);
+        // where function is: bool function (ProcEventInfo& eventInfo);
+        AuraCheckProcHookHandler::HookList DoCheckProc;
+
+        // executed when aura effect checks if it can proc the aura
+        // example: DoCheckEffectProc.Register(this, &class::function, EffectIndexSpecifier, EffectAuraNameSpecifier);
+        // where function is bool function (AuraEffect const* aurEff, ProcEventInfo& eventInfo);
+        AuraEffectCheckProcHookHandler::HookList DoCheckEffectProc;
+
+        // executed before aura procs (possibility to prevent charge drop/cooldown)
+        // example: DoPrepareProc.Register(this, &class::function);
+        // where function is: void function (ProcEventInfo& eventInfo);
+        AuraProcHookHandler::HookList DoPrepareProc;
+        // executed when aura procs
+        // example: OnProc.Register(this, &class::function);
+        // where function is: void function (ProcEventInfo& eventInfo);
+        AuraProcHookHandler::HookList OnProc;
+        // executed after aura proced
+        // example: AfterProc.Register(this, &class::function);
+        // where function is: void function (ProcEventInfo& eventInfo);
+        AuraProcHookHandler::HookList AfterProc;
+
+        // executed when aura effect procs
+        // example: OnEffectProc.Register(this, &class::function, EffectIndexSpecifier, EffectAuraNameSpecifier);
+        // where function is: void function (AuraEffect const* aurEff, ProcEventInfo& procInfo);
+        AuraEffectProcHookHandler::HookList OnEffectProc;
+        // executed after aura effect proced
+        // example: AfterEffectProc.Register(this, &class::function, EffectIndexSpecifier, EffectAuraNameSpecifier);
+        // where function is: void function (AuraEffect const* aurEff, ProcEventInfo& procInfo);
+        AuraEffectProcHookHandler::HookList AfterEffectProc;
 
         // AuraScript interface - hook/effect execution manipulators
 
@@ -707,19 +1032,19 @@ class AuraScript : public _SpellScript
         // returns spellid of the spell
         uint32 GetId() const;
 
-        // returns guid of object which casted the aura (m_originalCaster of the Spell class)
-        uint64 GetCasterGUID() const;
-        // returns unit which casted the aura or NULL if not avalible (caster logged out for example)
+        // returns guid of object which cast the aura (m_originalCaster of the Spell class)
+        ObjectGuid GetCasterGUID() const;
+        // returns unit which cast the aura or nullptr if not avalible (caster logged out for example)
         Unit* GetCaster() const;
-        // returns object on which aura was casted, target for non-area auras, area aura source for area auras
+        // returns object on which aura was cast, target for non-area auras, area aura source for area auras
         WorldObject* GetOwner() const;
-        // returns owner if it's unit or unit derived object, NULL otherwise (only for persistent area auras NULL is returned)
+        // returns owner if it's unit or unit derived object, nullptr otherwise (only for persistent area auras nullptr is returned)
         Unit* GetUnitOwner() const;
-        // returns owner if it's dynobj, NULL otherwise
+        // returns owner if it's dynobj, nullptr otherwise
         DynamicObject* GetDynobjOwner() const;
 
-        // removes aura with remove mode (see AuraRemoveMode enum)
-        void Remove(uint32 removeMode = 0);
+        // removes aura with remove mode (see AuraRemoveFlags enum)
+        void Remove(AuraRemoveFlags removeMode = AuraRemoveFlags::ByDefault);
         // returns aura object of script
         Aura* GetAura() const;
 
@@ -744,14 +1069,14 @@ class AuraScript : public _SpellScript
         uint8 GetCharges() const;
         void SetCharges(uint8 charges);
         uint8 CalcMaxCharges() const;
-        bool ModCharges(int8 num, AuraRemoveMode removeMode = AURA_REMOVE_BY_DEFAULT);
+        bool ModCharges(int8 num, AuraRemoveFlags removeMode = AuraRemoveFlags::ByDefault);
         // returns true if last charge dropped
-        bool DropCharge(AuraRemoveMode removeMode = AURA_REMOVE_BY_DEFAULT);
+        bool DropCharge(AuraRemoveFlags removeMode = AuraRemoveFlags::ByDefault);
 
         // stack amount manipulation
         uint8 GetStackAmount() const;
         void SetStackAmount(uint8 num);
-        bool ModStackAmount(int32 num, AuraRemoveMode removeMode = AURA_REMOVE_BY_DEFAULT);
+        bool ModStackAmount(int32 num, AuraRemoveFlags removeMode = AuraRemoveFlags::ByDefault);
 
         // passive - "working in background", not saved, not removed by immunities, not seen by player
         bool IsPassive() const;
@@ -760,18 +1085,18 @@ class AuraScript : public _SpellScript
 
         // check if aura has effect of given effindex
         bool HasEffect(uint8 effIndex) const;
-        // returns aura effect of given effect index or NULL
+        // returns aura effect of given effect index or nullptr
         AuraEffect* GetEffect(uint8 effIndex) const;
 
         // check if aura has effect of given aura type
         bool HasEffectType(AuraType type) const;
 
         // AuraScript interface - functions which are redirecting to AuraApplication class
-        // Do not call these in hooks in which AuraApplication is not avalible, otherwise result will differ from expected (the functions will return NULL)
+        // Do not call these in hooks in which AuraApplication is not avalible, otherwise result will differ from expected (the functions will return nullptr)
 
         // returns currently processed target of an aura
-        // Return value does not need to be NULL-checked, the only situation this will (always)
-        // return NULL is when the call happens in an unsupported hook, in other cases, it is always valid
+        // Return value does not need to be nullptr-checked, the only situation this will (always)
+        // return nullptr is when the call happens in an unsupported hook, in other cases, it is always valid
         Unit* GetTarget() const;
         // returns AuraApplication object of currently processed target
         AuraApplication const* GetTargetApplication() const;

@@ -1,6 +1,5 @@
 /*
- * Copyright (C) 2008-2013 TrinityCore <http://www.trinitycore.org/>
- * Copyright (C) 2006-2009 ScriptDev2 <https://scriptdev2.svn.sourceforge.net/>
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -19,14 +18,16 @@
 /* ScriptData
 SDName: Boss_High_Inquisitor_Fairbanks
 SD%Complete: 100
-SDComment: TODO: if this guy not involved in some special event, remove (and let ACID script)
+SDComment: @todo if this guy not involved in some special event, remove (and let ACID script)
 SDCategory: Scarlet Monastery
 EndScriptData */
 
 #include "ScriptMgr.h"
+#include "InstanceScript.h"
+#include "scarlet_monastery.h"
 #include "ScriptedCreature.h"
 
-enum eSpells
+enum Spells
 {
     SPELL_CURSEOFBLOOD              = 8282,
     SPELL_DISPELMAGIC               = 15090,
@@ -41,24 +42,15 @@ class boss_high_inquisitor_fairbanks : public CreatureScript
 public:
     boss_high_inquisitor_fairbanks() : CreatureScript("boss_high_inquisitor_fairbanks") { }
 
-    CreatureAI* GetAI(Creature* creature) const
-    {
-        return new boss_high_inquisitor_fairbanksAI (creature);
-    }
-
     struct boss_high_inquisitor_fairbanksAI : public ScriptedAI
     {
-        boss_high_inquisitor_fairbanksAI(Creature* creature) : ScriptedAI(creature) {}
+        boss_high_inquisitor_fairbanksAI(Creature* creature) : ScriptedAI(creature)
+        {
+            Initialize();
+            instance = creature->GetInstanceScript();
+        }
 
-        uint32 CurseOfBlood_Timer;
-        uint32 DispelMagic_Timer;
-        uint32 Fear_Timer;
-        uint32 Heal_Timer;
-        uint32 Sleep_Timer;
-        uint32 Dispel_Timer;
-        bool PowerWordShield;
-
-        void Reset()
+        void Initialize()
         {
             CurseOfBlood_Timer = 10000;
             DispelMagic_Timer = 30000;
@@ -67,23 +59,42 @@ public:
             Sleep_Timer = 30000;
             Dispel_Timer = 20000;
             PowerWordShield = false;
-            me->SetStandState(UNIT_STAND_STATE_DEAD);
-            me->SetUInt32Value(UNIT_FIELD_BYTES_1, 7);
         }
 
-        void EnterCombat(Unit* /*who*/)
+        uint32 CurseOfBlood_Timer;
+        uint32 DispelMagic_Timer;
+        uint32 Fear_Timer;
+        uint32 Heal_Timer;
+        uint32 Sleep_Timer;
+        uint32 Dispel_Timer;
+        bool PowerWordShield;
+        InstanceScript* instance;
+
+        void Reset() override
+        {
+            Initialize();
+            me->SetStandState(UNIT_STAND_STATE_DEAD);
+            instance->SetBossState(DATA_HIGH_INQUISITOR_FAIRBANKS, NOT_STARTED);
+        }
+
+        void JustEngagedWith(Unit* /*who*/) override
         {
             me->SetStandState(UNIT_STAND_STATE_STAND);
-            me->SetUInt32Value(UNIT_FIELD_BYTES_1, 0);
+            instance->SetBossState(DATA_HIGH_INQUISITOR_FAIRBANKS, IN_PROGRESS);
         }
 
-        void UpdateAI(const uint32 diff)
+        void JustDied(Unit* /*killer*/) override
+        {
+            instance->SetBossState(DATA_HIGH_INQUISITOR_FAIRBANKS, DONE);
+        }
+
+        void UpdateAI(uint32 diff) override
         {
             if (!UpdateVictim())
                 return;
 
             //If we are <25% hp cast Heal
-            if (!HealthAbovePct(25) && !me->IsNonMeleeSpellCasted(false) && Heal_Timer <= diff)
+            if (!HealthAbovePct(25) && !me->IsNonMeleeSpellCast(false) && Heal_Timer <= diff)
             {
                 DoCast(me, SPELL_HEAL);
                 Heal_Timer = 30000;
@@ -103,7 +114,7 @@ public:
             //Sleep_Timer
             if (Sleep_Timer <= diff)
             {
-                if (Unit* target = SelectTarget(SELECT_TARGET_TOPAGGRO, 0))
+                if (Unit* target = SelectTarget(SELECT_TARGET_MAXTHREAT, 0))
                     DoCast(target, SPELL_SLEEP);
 
                 Sleep_Timer = 30000;
@@ -130,7 +141,7 @@ public:
             //CurseOfBlood_Timer
             if (CurseOfBlood_Timer <= diff)
             {
-                DoCast(me->getVictim(), SPELL_CURSEOFBLOOD);
+                DoCastVictim(SPELL_CURSEOFBLOOD);
                 CurseOfBlood_Timer = 25000;
             }
             else CurseOfBlood_Timer -= diff;
@@ -138,6 +149,11 @@ public:
             DoMeleeAttackIfReady();
         }
     };
+
+    CreatureAI* GetAI(Creature* creature) const override
+    {
+        return GetScarletMonasteryAI<boss_high_inquisitor_fairbanksAI>(creature);
+    }
 };
 
 void AddSC_boss_high_inquisitor_fairbanks()

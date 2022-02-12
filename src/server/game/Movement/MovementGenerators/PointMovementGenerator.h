@@ -1,6 +1,5 @@
 /*
- * Copyright (C) 2008-2013 TrinityCore <http://www.trinitycore.org/>
- * Copyright (C) 2005-2009 MaNGOS <http://getmangos.com/>
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -20,57 +19,41 @@
 #define TRINITY_POINTMOVEMENTGENERATOR_H
 
 #include "MovementGenerator.h"
-#include "FollowerReference.h"
+
+class Creature;
 
 template<class T>
 class PointMovementGenerator : public MovementGeneratorMedium< T, PointMovementGenerator<T> >
 {
     public:
-        PointMovementGenerator(uint32 _id, float _x, float _y, float _z, float _speed = 0.0f) : id(_id),
-            i_x(_x), i_y(_y), i_z(_z), speed(_speed) {}
+        PointMovementGenerator(uint32 id, float x, float y, float z, bool generatePath, float speed = 0.0f) : _movementId(id), _x(x), _y(y), _z(z), _speed(speed), _generatePath(generatePath), _recalculateSpeed(false), _interrupt(false) { }
 
-        void DoInitialize(T &);
-        void DoFinalize(T &);
-        void DoReset(T &);
-        bool DoUpdate(T &, uint32);
+        MovementGeneratorType GetMovementGeneratorType() const override { return POINT_MOTION_TYPE; }
 
-        void MovementInform(T &);
+        void DoInitialize(T*);
+        void DoFinalize(T*);
+        void DoReset(T*);
+        bool DoUpdate(T*, uint32);
 
-        void unitSpeedChanged() { i_recalculateSpeed = true; }
-
-        MovementGeneratorType GetMovementGeneratorType() { return POINT_MOTION_TYPE; }
-
-        bool GetDestination(float& x, float& y, float& z) const { x=i_x; y=i_y; z=i_z; return true; }
+        void UnitSpeedChanged() override { _recalculateSpeed = true; }
     private:
-        uint32 id;
-        float i_x, i_y, i_z;
-        float speed;
-        bool i_recalculateSpeed;
+        void MovementInform(T*);
+
+        uint32 _movementId;
+        float _x, _y, _z;
+        float _speed;
+        bool _generatePath;
+        bool _recalculateSpeed;
+        bool _interrupt;
 };
 
 class AssistanceMovementGenerator : public PointMovementGenerator<Creature>
 {
     public:
-        AssistanceMovementGenerator(float _x, float _y, float _z) :
-            PointMovementGenerator<Creature>(0, _x, _y, _z) {}
+        AssistanceMovementGenerator(float _x, float _y, float _z) : PointMovementGenerator<Creature>(0, _x, _y, _z, true) { }
 
-        MovementGeneratorType GetMovementGeneratorType() { return ASSISTANCE_MOTION_TYPE; }
-        void Finalize(Unit &);
-};
-
-// Does almost nothing - just doesn't allows previous movegen interrupt current effect.
-class EffectMovementGenerator : public MovementGenerator
-{
-    public:
-        explicit EffectMovementGenerator(uint32 Id) : m_Id(Id) {}
-        void Initialize(Unit &) {}
-        void Finalize(Unit &unit);
-        void Reset(Unit &) {}
-        bool Update(Unit &u, uint32);
-        MovementGeneratorType GetMovementGeneratorType() { return EFFECT_MOTION_TYPE; }
-    private:
-        uint32 m_Id;
+        MovementGeneratorType GetMovementGeneratorType() const override { return ASSISTANCE_MOTION_TYPE; }
+        void Finalize(Unit*) override;
 };
 
 #endif
-

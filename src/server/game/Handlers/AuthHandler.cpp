@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2013 TrinityCore <http://www.trinitycore.org/>
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -15,26 +15,42 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "Opcodes.h"
 #include "WorldSession.h"
-#include "WorldPacket.h"
+#include "AuthenticationPackets.h"
 
-void WorldSession::SendAuthResponse(uint8 code, bool shortForm, uint32 queuePos)
+void WorldSession::SendAuthResponse(uint8 code, bool queued, uint32 queuePos)
 {
-    WorldPacket packet(SMSG_AUTH_RESPONSE, 1 + 4 + 1 + 4 + 1 + (shortForm ? 0 : (4 + 1)));
-    packet << uint8(code);
-    packet << uint32(0);                                   // BillingTimeRemaining
-    packet << uint8(0);                                    // BillingPlanFlags
-    packet << uint32(0);                                   // BillingTimeRested
-    packet << uint8(Expansion());                          // 0 - normal, 1 - TBC, 2 - WOTLK, must be set in database manually for each account
+    WorldPackets::Auth::AuthResponse response;
+    response.Result = code;
 
-    if (!shortForm)
+    if (code == AUTH_OK)
     {
-        packet << uint32(queuePos);                             // Queue position
-        packet << uint8(0);                                     // Realm has a free character migration - bool
+        response.SuccessInfo.emplace();
+
+        response.SuccessInfo->AccountExpansionLevel = GetAccountExpansion();
+        response.SuccessInfo->ActiveExpansionLevel = GetExpansion();
     }
 
-    SendPacket(&packet);
+    if (queued)
+    {
+        response.WaitInfo.emplace();
+        response.WaitInfo->WaitCount = queuePos;
+    }
+
+    SendPacket(response.Write());
+}
+
+void WorldSession::SendAuthWaitQue(uint32 position)
+{
+    if (position)
+    {
+        WorldPackets::Auth::WaitQueueUpdate waitQueueUpdate;
+        waitQueueUpdate.WaitInfo.WaitCount = position;
+        waitQueueUpdate.WaitInfo.HasFCM = true;
+        SendPacket(waitQueueUpdate.Write());
+    }
+    else
+        SendPacket(WorldPackets::Auth::WaitQueueFinish().Write());
 }
 
 void WorldSession::SendClientCacheVersion(uint32 version)

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2013 TrinityCore <http://www.trinitycore.org/>
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -19,6 +19,9 @@
 #define _LFGQUEUE_H
 
 #include "LFG.h"
+
+namespace lfg
+{
 
 enum LfgCompatibility
 {
@@ -48,14 +51,13 @@ struct LfgCompatibilityData
 /// Stores player or group queue info
 struct LfgQueueData
 {
-    LfgQueueData(): joinTime(time_t(time(NULL))), tanks(LFG_TANKS_NEEDED),
-        healers(LFG_HEALERS_NEEDED), dps(LFG_DPS_NEEDED)
-        { }
+    LfgQueueData();
 
-    LfgQueueData(time_t _joinTime, const LfgDungeonSet &_dungeons, LfgRolesMap const& _roles):
-        joinTime(_joinTime), tanks(LFG_TANKS_NEEDED), healers(LFG_HEALERS_NEEDED),
-        dps(LFG_DPS_NEEDED), dungeons(_dungeons), roles(_roles)
-        { }
+    LfgQueueData(time_t _joinTime, LfgDungeonSet const& _dungeons, LfgRolesMap const& _roles) :
+        joinTime(_joinTime), dungeons(_dungeons), roles(_roles)
+    {
+        InitializeGroupSetup();
+    }
 
     time_t joinTime;                                       ///< Player queue join time (to calculate wait times)
     uint8 tanks;                                           ///< Tanks needed
@@ -64,31 +66,43 @@ struct LfgQueueData
     LfgDungeonSet dungeons;                                ///< Selected Player/Group Dungeon/s
     LfgRolesMap roles;                                     ///< Selected Player Role/s
     std::string bestCompatible;                            ///< Best compatible combination of people queued
+
+    void InitializeGroupSetup();
 };
 
 struct LfgWaitTime
 {
-    LfgWaitTime(): time(-1), number(0) {}
+    LfgWaitTime(): time(-1), number(0) { }
     int32 time;                                            ///< Wait time
     uint32 number;                                         ///< Number of people used to get that wait time
 };
 
+struct LfgQueueRoleData
+{
+    LfgQueueRoleData() : currentDps(0), currentHealers(0), currentTanks(0) { }
+    uint32 currentDps;
+    uint32 currentHealers;
+    uint32 currentTanks;
+};
+
 typedef std::map<uint32, LfgWaitTime> LfgWaitTimesContainer;
 typedef std::map<std::string, LfgCompatibilityData> LfgCompatibleContainer;
-typedef std::map<uint64, LfgQueueData> LfgQueueDataContainer;
+typedef std::map<ObjectGuid, LfgQueueData> LfgQueueDataContainer;
+typedef std::map<uint32, LfgQueueRoleData> LfgQueueRoleContainer;
 
 /**
     Stores all data related to queue
 */
-class LFGQueue
+class TC_GAME_API LFGQueue
 {
     public:
 
         // Add/Remove from queue
-        void AddToQueue(uint64 guid);
-        void RemoveFromQueue(uint64 guid);
-        void AddQueueData(uint64 guid, time_t joinTime, const LfgDungeonSet &dungeons, const LfgRolesMap &rolesMap);
-        void RemoveQueueData(uint64 guid);
+        std::string GetDetailedMatchRoles(GuidList const& check) const;
+        void AddToQueue(ObjectGuid guid, bool reAdd = false);
+        void RemoveFromQueue(ObjectGuid guid);
+        void AddQueueData(ObjectGuid guid, time_t joinTime, LfgDungeonSet const& dungeons, LfgRolesMap const& rolesMap);
+        void RemoveQueueData(ObjectGuid guid);
 
         // Update Timers (when proposal success)
         void UpdateWaitTimeAvg(int32 waitTime, uint32 dungeonId);
@@ -97,8 +111,8 @@ class LFGQueue
         void UpdateWaitTimeDps(int32 waitTime, uint32 dungeonId);
 
         // Update Queue timers
-        void UpdateQueueTimers(time_t currTime);
-        time_t GetJoinTime(uint64 guid);
+        void UpdateQueueTimers(uint8 queueId, time_t currTime, LfgQueueRoleContainer& rolesPerDungeonId);
+        time_t GetJoinTime(ObjectGuid guid) const;
 
         // Find new group
         uint8 FindGroups();
@@ -109,24 +123,24 @@ class LFGQueue
 
     private:
         void SetQueueUpdateData(std::string const& strGuids, LfgRolesMap const& proposalRoles);
-        LfgRolesMap const& RemoveFromQueueUpdateData(uint64 guid);
 
-        void AddToNewQueue(uint64 guid);
-        void AddToCurrentQueue(uint64 guid);
-        void RemoveFromNewQueue(uint64 guid);
-        void RemoveFromCurrentQueue(uint64 guid);
+        void AddToNewQueue(ObjectGuid guid);
+        void AddToCurrentQueue(ObjectGuid guid);
+        void AddToFrontCurrentQueue(ObjectGuid guid);
+        void RemoveFromNewQueue(ObjectGuid guid);
+        void RemoveFromCurrentQueue(ObjectGuid guid);
 
         void SetCompatibles(std::string const& key, LfgCompatibility compatibles);
         LfgCompatibility GetCompatibles(std::string const& key);
-        void RemoveFromCompatibles(uint64 guid);
+        void RemoveFromCompatibles(ObjectGuid guid);
 
         void SetCompatibilityData(std::string const& key, LfgCompatibilityData const& compatibles);
         LfgCompatibilityData* GetCompatibilityData(std::string const& key);
         void FindBestCompatibleInQueue(LfgQueueDataContainer::iterator itrQueue);
         void UpdateBestCompatibleInQueue(LfgQueueDataContainer::iterator itrQueue, std::string const& key, LfgRolesMap const& roles);
 
-        LfgCompatibility FindNewGroups(LfgGuidList& check, LfgGuidList& all);
-        LfgCompatibility CheckCompatibility(LfgGuidList check);
+        LfgCompatibility FindNewGroups(GuidList& check, GuidList& all);
+        LfgCompatibility CheckCompatibility(GuidList check);
 
         // Queue
         LfgQueueDataContainer QueueDataStore;              ///< Queued groups
@@ -136,8 +150,10 @@ class LFGQueue
         LfgWaitTimesContainer waitTimesTankStore;          ///< Average wait time to find a group queuing as tank
         LfgWaitTimesContainer waitTimesHealerStore;        ///< Average wait time to find a group queuing as healer
         LfgWaitTimesContainer waitTimesDpsStore;           ///< Average wait time to find a group queuing as dps
-        LfgGuidList currentQueueStore;                     ///< Ordered list. Used to find groups
-        LfgGuidList newToQueueStore;                       ///< New groups to add to queue
+        GuidList currentQueueStore;                        ///< Ordered list. Used to find groups
+        GuidList newToQueueStore;                          ///< New groups to add to queue
 };
+
+} // namespace lfg
 
 #endif

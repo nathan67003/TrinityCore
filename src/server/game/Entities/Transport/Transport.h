@@ -1,6 +1,5 @@
 /*
- * Copyright (C) 2008-2013 TrinityCore <http://www.trinitycore.org/>
- * Copyright (C) 2005-2009 MaNGOS <http://getmangos.com/>
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -20,85 +19,158 @@
 #define TRANSPORTS_H
 
 #include "GameObject.h"
+#include "TransportMgr.h"
 #include "VehicleDefines.h"
 
-#include <map>
-#include <set>
-#include <string>
+struct CreatureData;
 
-class Transport : public GameObject, public TransportBase
+class TC_GAME_API Transport : public GameObject, public TransportBase
 {
     public:
-        Transport(uint32 period, uint32 script);
+        typedef std::set<WorldObject*> PassengerSet;
+
+        Transport();
         ~Transport();
 
-        bool Create(uint32 guidlow, uint32 entry, uint32 mapid, float x, float y, float z, float ang, uint32 animprogress, uint32 dynflags);
-        bool GenerateWaypoints(uint32 pathid, std::set<uint32> &mapids);
-        void Update(uint32 p_time);
-        bool AddPassenger(Player* passenger);
-        bool RemovePassenger(Player* passenger);
+        bool Create(ObjectGuid::LowType guidlow, uint32 entry, Map* map, Position const& pos, QuaternionData const& rotation, uint32 animprogress, GOState go_state, uint32 artKit = 0, bool dynamic = false, ObjectGuid::LowType spawnid = 0) override;
+        bool CreateTransport(ObjectGuid::LowType guidlow, uint32 entry, uint32 mapid, Position const& pos, uint32 animprogress);
 
-        void RemovePassenger(Creature* passenger) { m_NPCPassengerSet.erase(passenger); }
+        void CleanupsBeforeDelete(bool finalCleanup = true) override;
 
-        typedef std::set<Player*> PlayerSet;
-        PlayerSet const& GetPassengers() const { return m_passengers; }
-
-        typedef std::set<Creature*> CreatureSet;
-        CreatureSet m_NPCPassengerSet;
-        uint32 AddNPCPassenger(uint32 tguid, uint32 entry, float x, float y, float z, float o, uint32 anim=0);
-        void UpdatePosition(MovementInfo* mi);
-        void UpdateNPCPositions();
+        void AddPassenger(WorldObject* passenger);
+        virtual void RemovePassenger(WorldObject* passenger);
+        PassengerSet const& GetPassengers() const { return _passengers; }
 
         /// This method transforms supplied transport offsets into global coordinates
-        void CalculatePassengerPosition(float& x, float& y, float& z, float& o);
+        void CalculatePassengerPosition(float& x, float& y, float& z, float* o = nullptr) const override
+        {
+            TransportBase::CalculatePassengerPosition(x, y, z, o, GetPositionX(), GetPositionY(), GetPositionZ(), GetOrientation());
+        }
 
         /// This method transforms supplied global coordinates into local offsets
-        void CalculatePassengerOffset(float& x, float& y, float& z, float& o);
-
-        void BuildStartMovePacket(Map const* targetMap);
-        void BuildStopMovePacket(Map const* targetMap);
-        uint32 GetScriptId() const { return ScriptId; }
-    private:
-        struct WayPoint
+        void CalculatePassengerOffset(float& x, float& y, float& z, float* o = nullptr) const override
         {
-            WayPoint() : mapid(0), x(0), y(0), z(0), teleport(false), id(0) {}
-            WayPoint(uint32 _mapid, float _x, float _y, float _z, bool _teleport, uint32 _id = 0,
-                uint32 _arrivalEventID = 0, uint32 _departureEventID = 0)
-                : mapid(_mapid), x(_x), y(_y), z(_z), teleport(_teleport), id(_id),
-                arrivalEventID(_arrivalEventID), departureEventID(_departureEventID)
-            {
-            }
-            uint32 mapid;
-            float x;
-            float y;
-            float z;
-            bool teleport;
-            uint32 id;
-            uint32 arrivalEventID;
-            uint32 departureEventID;
-        };
+            TransportBase::CalculatePassengerOffset(x, y, z, o, GetPositionX(), GetPositionY(), GetPositionZ(), GetOrientation());
+        }
 
-        typedef std::map<uint32, WayPoint> WayPointMap;
+        void Update(uint32 diff) override;
 
-        WayPointMap::const_iterator m_curr;
-        WayPointMap::const_iterator m_next;
-        uint32 m_pathTime;
-        uint32 m_timer;
+        bool IsDynamicTransport() const { return _isDynamicTransport; }
 
-        PlayerSet m_passengers;
+        uint32 GetTransportPeriod() const { return GetUInt32Value(GAMEOBJECT_LEVEL); }
+        void SetPeriod(uint32 period) { SetUInt32Value(GAMEOBJECT_LEVEL, period); }
+        uint32 GetTimer() const { return GetGOValue()->Transport.PathProgress; }
 
-        uint32 currenttguid;
-        uint32 m_period;
-        uint32 ScriptId;
+        void SetTransportState(GOState state, uint32 stopFrame = 0);
+
+        void RelocateToProgress(uint32 progress);
+
+        void SetDestinationStopFrameTime(uint32 time) { _destinationStopFrameTime = time; }
+        uint32 GetDestinationStopFrameTime() const { return _destinationStopFrameTime;  }
+
+        void SetCurrentTransportTime(uint32 time) { _currentTransportTime = time; }
+        uint32 GetCurrentTransportTime() const { return _currentTransportTime; }
+
+        void SetLastStopFrameTime(uint32 time) { _lastStopFrameTime = time; }
+        uint32 GetLastStopFrameTime() const { return _lastStopFrameTime; }
+
+    protected:
+        void UpdatePassengerPositions(PassengerSet& passengers);
+        void UpdatePositionForPassenger(WorldObject* passenger);
+
+        PassengerSet _passengers;
+        PassengerSet::iterator _passengerTeleportItr;
+
+        uint32 _destinationStopFrameTime;
+        uint32 _currentTransportTime;
+        uint32 _lastStopFrameTime;
+        uint32 _finalStopFrameTime;
+        bool _isDynamicTransport;
+        bool _initialRelocate;
+};
+
+class TC_GAME_API MapTransport : public Transport
+{
+        friend MapTransport* TransportMgr::CreateTransport(uint32, ObjectGuid::LowType, Map*, uint8, uint32, uint32);
+
+        MapTransport();
     public:
-        WayPointMap m_WayPoints;
-        uint32 m_nextNodeTime;
+        ~MapTransport();
+
+        bool CreateMapTransport(ObjectGuid::LowType guidlow, uint32 entry, uint32 mapid, float x, float y, float z, float ang, uint32 animprogress);
+        void CleanupsBeforeDelete(bool finalCleanup = true) override;
+
+        void Update(uint32 diff) override;
+        void DelayedUpdate(uint32 diff);
+
+        void BuildUpdate(UpdateDataMapType& data_map) override;
+
+        void RemovePassenger(WorldObject* passenger) override;
+
+        Creature* CreateNPCPassenger(ObjectGuid::LowType guid, CreatureData const* data);
+        GameObject* CreateGOPassenger(ObjectGuid::LowType guid, GameObjectData const* data);
+
+        /**
+        * @fn bool Transport::SummonPassenger(uint32, Position const&, TempSummonType, SummonPropertiesEntry const*, uint32, Unit*, uint32, uint32)
+        *
+        * @brief Temporarily summons a creature as passenger on this transport.
+        *
+        * @param entry Id of the creature from creature_template table
+        * @param pos Initial position of the creature (transport offsets)
+        * @param summonType
+        * @param properties
+        * @param duration Determines how long the creauture will exist in world depending on @summonType (in milliseconds)
+        * @param summoner Summoner of the creature (for AI purposes)
+        * @param spellId
+        * @param vehId If set, this value overrides vehicle id from creature_template that the creature will use
+        *
+        * @return Summoned creature.
+        */
+        TempSummon* SummonPassenger(uint32 entry, Position const& pos, TempSummonType summonType, SummonPropertiesEntry const* properties = nullptr, uint32 duration = 0, Unit* summoner = nullptr, uint32 spellId = 0, uint32 vehId = 0);
+
+        KeyFrameVec const& GetKeyFrames() const { return _transportInfo->keyFrames; }
+
+        void UpdatePosition(float x, float y, float z, float o);
+
+        //! Needed when transport moves from inactive to active grid
+        void LoadStaticPassengers();
+
+        //! Needed when transport enters inactive grid
+        void UnloadStaticPassengers();
+
+        void EnableMovement(bool enabled);
+
+        void SetDelayedAddModelToMap() { _delayedAddModel = true; }
+
+        TransportTemplate const* GetTransportTemplate() const { return _transportInfo; }
 
     private:
-        void TeleportTransport(uint32 newMapid, float x, float y, float z);
-        void UpdateForMap(Map const* map);
-        void DoEventIfAny(WayPointMap::value_type const& node, bool departure);
-        WayPointMap::const_iterator GetNextWayPoint();
-};
-#endif
+        void MoveToNextWaypoint();
+        float CalculateSegmentPos(float perc);
+        bool TeleportTransport(uint32 newMapid, float x, float y, float z, float o);
+        void DelayedTeleportTransport();
+        void DoEventIfAny(KeyFrame const& node, bool departure);
 
+        //! Helpers to know if stop frame was reached
+        bool IsMoving() const { return _isMoving; }
+        void SetMoving(bool val) { _isMoving = val; }
+
+        TransportTemplate const* _transportInfo;
+
+        KeyFrameVec::const_iterator _currentFrame;
+        KeyFrameVec::const_iterator _nextFrame;
+        TimeTrackerSmall _positionChangeTimer;
+        bool _isMoving;
+        bool _pendingStop;
+
+        //! These are needed to properly control events triggering only once for each frame
+        bool _triggeredArrivalEvent;
+        bool _triggeredDepartureEvent;
+
+        PassengerSet _staticPassengers;
+
+        bool _delayedAddModel;
+        bool _delayedTeleport;
+};
+
+#endif

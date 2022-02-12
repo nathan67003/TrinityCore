@@ -1,19 +1,18 @@
 /*
- * Copyright (C) 2005-2011 MaNGOS <http://getmangos.com/>
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
+ * option) any later version.
  *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+ * more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * You should have received a copy of the GNU General Public License along
+ * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "vmapexport.h"
@@ -25,65 +24,75 @@ char * wdtGetPlainName(char * FileName)
 {
     char * szTemp;
 
-    if((szTemp = strrchr(FileName, '\\')) != NULL)
+    if ((szTemp = strrchr(FileName, '\\')) != nullptr)
         FileName = szTemp + 1;
     return FileName;
 }
 
-WDTFile::WDTFile(char* file_name, char* file_name1) : WDT(file_name), gWmoInstansName(NULL), gnWMO(0)
+extern HANDLE WorldMpq;
+
+WDTFile::WDTFile(char const* filePath, std::string mapName, bool cache)
+    : _file(WorldMpq, filePath), _mapName(std::move(mapName))
 {
-    filename.append(file_name1,strlen(file_name1));
+    if (cache)
+    {
+        _adtCache = std::make_unique<ADTCache>();
+        memset(_adtCache->file, 0, sizeof(_adtCache->file));
+    }
+    else
+        _adtCache = nullptr;
 }
 
-bool WDTFile::init(char */*map_id*/, unsigned int mapID)
+WDTFile::~WDTFile() = default;
+
+bool WDTFile::init(uint32 mapId)
 {
-    if (WDT.isEof())
-    {
-        //printf("Can't find WDT file.\n");
+    if (_file.isEof())
         return false;
-    }
 
     char fourcc[5];
     uint32 size;
 
     std::string dirname = std::string(szWorkDirWmo) + "/dir_bin";
-    FILE *dirfile;
-    dirfile = fopen(dirname.c_str(), "ab");
-    if(!dirfile)
+    FILE* dirfile = fopen(dirname.c_str(), "ab");
+    if (!dirfile)
     {
         printf("Can't open dirfile!'%s'\n", dirname.c_str());
         return false;
     }
 
-    while (!WDT.isEof())
+    while (!_file.isEof())
     {
-        WDT.read(fourcc,4);
-        WDT.read(&size, 4);
+        _file.read(fourcc, 4);
+        _file.read(&size, 4);
 
         flipcc(fourcc);
         fourcc[4] = 0;
 
-        size_t nextpos = WDT.getPos() + size;
+        size_t nextpos = _file.getPos() + size;
 
-        if (!strcmp(fourcc,"MAIN"))
+        if (!strcmp(fourcc, "MAIN"))
         {
         }
-        if (!strcmp(fourcc,"MWMO"))
+        if (!strcmp(fourcc, "MWMO"))
         {
             // global map objects
             if (size)
             {
                 char *buf = new char[size];
-                WDT.read(buf, size);
-                char *p=buf;
-                int q = 0;
-                gWmoInstansName = new string[size];
+                _file.read(buf, size);
+                char *p = buf;
                 while (p < buf + size)
                 {
-                    char* s=wdtGetPlainName(p);
-                    fixnamen(s,strlen(s));
-                    p=p+strlen(p)+1;
-                    gWmoInstansName[q++] = s;
+                    std::string path(p);
+
+                    char* s = wdtGetPlainName(p);
+                    FixNameCase(s, strlen(s));
+                    FixNameSpaces(s, strlen(s));
+                    p = p + strlen(p) + 1;
+                    _wmoNames.push_back(s);
+
+                    ExtractSingleWmo(path);
                 }
                 delete[] buf;
             }
@@ -93,38 +102,45 @@ bool WDTFile::init(char */*map_id*/, unsigned int mapID)
             // global wmo instance data
             if (size)
             {
-                gnWMO = (int)size / 64;
-
-                for (int i = 0; i < gnWMO; ++i)
+                uint32 mapObjectCount = size / sizeof(ADT::MODF);
+                for (uint32 i = 0; i < mapObjectCount; ++i)
                 {
-                    int id;
-                    WDT.read(&id, 4);
-                    WMOInstance inst(WDT,gWmoInstansName[id].c_str(), mapID, 65, 65, dirfile);
+                    ADT::MODF mapObjDef;
+                    _file.read(&mapObjDef, sizeof(ADT::MODF));
+                    MapObject::Extract(mapObjDef, _wmoNames[mapObjDef.Id].c_str(), true, mapId, mapId, dirfile, nullptr);
+                    Doodad::ExtractSet(WmoDoodads[_wmoNames[mapObjDef.Id]], mapObjDef, true, mapId, mapId, dirfile, nullptr);
                 }
-
-                delete[] gWmoInstansName;
             }
         }
-        WDT.seek((int)nextpos);
+        _file.seek((int)nextpos);
     }
 
-    WDT.close();
+    _file.close();
     fclose(dirfile);
     return true;
 }
 
-WDTFile::~WDTFile(void)
+ADTFile* WDTFile::GetMap(int32 x, int32 y)
 {
-    WDT.close();
-}
+    if (!(x >= 0 && y >= 0 && x < 64 && y < 64))
+        return nullptr;
 
-ADTFile* WDTFile::GetMap(int x, int z)
-{
-    if(!(x>=0 && z >= 0 && x<64 && z<64))
-        return NULL;
+    if (_adtCache && _adtCache->file[x][y])
+        return _adtCache->file[x][y].get();
 
     char name[512];
 
-    sprintf(name,"World\\Maps\\%s\\%s_%d_%d.adt", filename.c_str(), filename.c_str(), x, z);
-    return new ADTFile(name);
+    sprintf(name, "World\\Maps\\%s\\%s_%d_%d_obj0.adt", _mapName.c_str(), _mapName.c_str(), x, y);
+    ADTFile* adt = new ADTFile(name, _adtCache != nullptr);
+    if (_adtCache)
+        _adtCache->file[x][y].reset(adt);
+    return adt;
+}
+
+void WDTFile::FreeADT(ADTFile* adt)
+{
+    if (_adtCache)
+        return;
+
+    delete adt;
 }

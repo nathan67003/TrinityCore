@@ -1,6 +1,5 @@
 /*
- * Copyright (C) 2008-2013 TrinityCore <http://www.trinitycore.org/>
- * Copyright (C) 2005-2009 MaNGOS <http://getmangos.com/>
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -17,52 +16,56 @@
  */
 
 #include "GuardAI.h"
+#include "Creature.h"
 #include "Errors.h"
+#include "Log.h"
+#include "MotionMaster.h"
 #include "Player.h"
-#include "ObjectAccessor.h"
-#include "World.h"
-#include "CreatureAIImpl.h"
-
-int GuardAI::Permissible(Creature const* creature)
-{
-    if (creature->isGuard())
-        return PERMIT_BASE_SPECIAL;
-
-    return PERMIT_BASE_NO;
-}
 
 GuardAI::GuardAI(Creature* creature) : ScriptedAI(creature)
 {
 }
 
+int32 GuardAI::Permissible(Creature const* creature)
+{
+    if (creature->IsGuard())
+        return PERMIT_BASE_PROACTIVE;
+
+    return PERMIT_BASE_NO;
+}
+
+void GuardAI::UpdateAI(uint32 /*diff*/)
+{
+    if (!UpdateVictim())
+        return;
+
+    DoMeleeAttackIfReady();
+}
+
 bool GuardAI::CanSeeAlways(WorldObject const* obj)
 {
-    if (!obj->isType(TYPEMASK_UNIT))
-        return false;
-
-    ThreatContainer::StorageType threatList = me->getThreatManager().getThreatList();
-    for (ThreatContainer::StorageType::const_iterator itr = threatList.begin(); itr != threatList.end(); ++itr)
-        if ((*itr)->getUnitGuid() == obj->GetGUID())
+    if (Unit const* unit = obj->ToUnit())
+        if (unit->IsControlledByPlayer() && me->IsEngagedBy(unit))
             return true;
 
     return false;
 }
 
-void GuardAI::EnterEvadeMode()
+void GuardAI::EnterEvadeMode(EvadeReason /*why*/)
 {
-    if (!me->isAlive())
+    if (!me->IsAlive())
     {
         me->GetMotionMaster()->MoveIdle();
         me->CombatStop(true);
-        me->DeleteThreatList();
+        EngagementOver();
         return;
     }
 
-    sLog->outDebug(LOG_FILTER_UNITS, "Guard entry: %u enters evade mode.", me->GetEntry());
+    TC_LOG_DEBUG("entities.unit", "Guard entry: %u enters evade mode.", me->GetEntry());
 
     me->RemoveAllAuras();
-    me->DeleteThreatList();
     me->CombatStop(true);
+    EngagementOver();
 
     // Remove ChaseMovementGenerator from MotionMaster stack list, and add HomeMovementGenerator instead
     if (me->GetMotionMaster()->GetCurrentMovementGeneratorType() == CHASE_MOTION_TYPE)
@@ -71,6 +74,7 @@ void GuardAI::EnterEvadeMode()
 
 void GuardAI::JustDied(Unit* killer)
 {
-    if (Player* player = killer->GetCharmerOrOwnerPlayerOrPlayerItself())
-        me->SendZoneUnderAttackMessage(player);
+    if (killer)
+        if (Player* player = killer->GetCharmerOrOwnerPlayerOrPlayerItself())
+            me->SendZoneUnderAttackMessage(player);
 }

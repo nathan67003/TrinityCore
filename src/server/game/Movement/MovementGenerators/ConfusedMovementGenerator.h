@@ -1,6 +1,5 @@
 /*
- * Copyright (C) 2008-2013 TrinityCore <http://www.trinitycore.org/>
- * Copyright (C) 2005-2009 MaNGOS <http://getmangos.com/>
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -22,25 +21,25 @@
 #include "MovementGenerator.h"
 #include "Timer.h"
 
-#define MAX_CONF_WAYPOINTS 24 //! Allows a twelve second confusion if i_nextMove always is the absolute minimum timer.
-
 template<class T>
 class ConfusedMovementGenerator : public MovementGeneratorMedium< T, ConfusedMovementGenerator<T> >
 {
     public:
-        explicit ConfusedMovementGenerator() : i_nextMoveTime(0) {}
+        explicit ConfusedMovementGenerator() : _path(nullptr), _timer(0), _x(0.f), _y(0.f), _z(0.f), _interrupt(false) { }
+        ~ConfusedMovementGenerator();
 
-        void DoInitialize(T &);
-        void DoFinalize(T &);
-        void DoReset(T &);
-        bool DoUpdate(T &, uint32);
+        MovementGeneratorType GetMovementGeneratorType() const override { return CONFUSED_MOTION_TYPE; }
 
-        MovementGeneratorType GetMovementGeneratorType() { return CONFUSED_MOTION_TYPE; }
+        void DoInitialize(T*);
+        void DoFinalize(T*);
+        void DoReset(T*);
+        bool DoUpdate(T*, uint32);
+
     private:
-        void _InitSpecific(T &, bool &, bool &);
-        TimeTracker i_nextMoveTime;
-        float i_waypoints[MAX_CONF_WAYPOINTS+1][3];
-        uint32 i_nextMove;
+        PathGenerator* _path;
+        TimeTracker _timer;
+        float _x, _y, _z;
+        bool _interrupt;
 };
-#endif
 
+#endif

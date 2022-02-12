@@ -1,6 +1,5 @@
 /*
- * Copyright (C) 2008-2013 TrinityCore <http://www.trinitycore.org/>
- * Copyright (C) 2005-2009 MaNGOS <http://getmangos.com/>
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -20,25 +19,36 @@
 #define TRINITY_RANDOMMOTIONGENERATOR_H
 
 #include "MovementGenerator.h"
+#include "Position.h"
+#include "Timer.h"
 
 template<class T>
 class RandomMovementGenerator : public MovementGeneratorMedium< T, RandomMovementGenerator<T> >
 {
     public:
-        RandomMovementGenerator(float spawn_dist = 0.0f) : i_nextMoveTime(0), wander_distance(spawn_dist) {}
+        explicit RandomMovementGenerator(float distance = 0.0f) : _path(nullptr), _timer(0), _reference(), _wanderDistance(distance), _wanderSteps(0), _interrupt(false), _stalled(false) { }
+        ~RandomMovementGenerator();
 
-        void _setRandomLocation(T &);
-        void DoInitialize(T &);
-        void DoFinalize(T &);
-        void DoReset(T &);
-        bool DoUpdate(T &, const uint32);
-        bool GetResetPosition(T&, float& x, float& y, float& z);
-        MovementGeneratorType GetMovementGeneratorType() { return RANDOM_MOTION_TYPE; }
+        MovementGeneratorType GetMovementGeneratorType() const override { return RANDOM_MOTION_TYPE; }
+
+        void Pause(uint32 timer = 0) override;
+        void Resume(uint32 overrideTimer = 0) override;
+
+        void DoInitialize(T*);
+        void DoFinalize(T*);
+        void DoReset(T*);
+        bool DoUpdate(T*, uint32);
+
     private:
-        TimeTrackerSmall i_nextMoveTime;
+        void SetRandomLocation(T*);
 
-        uint32 i_nextMove;
-        float wander_distance;
+        PathGenerator* _path;
+        TimeTracker _timer;
+        Position _reference;
+        float _wanderDistance;
+        uint8 _wanderSteps;
+        bool _interrupt;
+        bool _stalled;
 };
-#endif
 
+#endif
