@@ -74,35 +74,6 @@ bool SpellImplicitTargetInfo::IsArea() const
     return GetSelectionCategory() == TARGET_SELECT_CATEGORY_AREA || GetSelectionCategory() == TARGET_SELECT_CATEGORY_CONE;
 }
 
-bool SpellImplicitTargetInfo::IsProximityBasedAoe() const
-{
-    switch (_target)
-    {
-        case TARGET_UNIT_SRC_AREA_ENTRY:
-        case TARGET_UNIT_SRC_AREA_ENEMY:
-        case TARGET_UNIT_CASTER_AREA_PARTY:
-        case TARGET_UNIT_SRC_AREA_ALLY:
-        case TARGET_UNIT_SRC_AREA_PARTY:
-        case TARGET_UNIT_LASTTARGET_AREA_PARTY:
-        case TARGET_GAMEOBJECT_SRC_AREA:
-        case TARGET_UNIT_CASTER_AREA_RAID:
-        case TARGET_CORPSE_SRC_AREA_ENEMY:
-            return true;
-
-        case TARGET_UNIT_DEST_AREA_ENTRY:
-        case TARGET_UNIT_DEST_AREA_ENEMY:
-        case TARGET_UNIT_DEST_AREA_ALLY:
-        case TARGET_UNIT_DEST_AREA_PARTY:
-        case TARGET_GAMEOBJECT_DEST_AREA:
-        case TARGET_UNIT_TARGET_AREA_RAID_CLASS:
-            return false;
-
-        default:
-            TC_LOG_WARN("spells", "SpellImplicitTargetInfo::IsProximityBasedAoe called a non-aoe spell");
-            return false;
-    }
-}
-
 SpellTargetSelectionCategories SpellImplicitTargetInfo::GetSelectionCategory() const
 {
     return _data[_target].SelectionCategory;
@@ -1517,7 +1488,7 @@ bool SpellInfo::IsAutoRepeatRangedSpell() const
 
 bool SpellInfo::CausesInitialThreat() const
 {
-    return !(HasAttribute(SPELL_ATTR1_NO_THREAT) || HasAttribute(SPELL_ATTR2_NO_INITIAL_THREAT));
+    return !HasAttribute(SPELL_ATTR1_NO_THREAT) && !HasAttribute(SPELL_ATTR2_NO_INITIAL_THREAT) && !HasAttribute(SPELL_ATTR0_CU_NO_INITIAL_THREAT);
 }
 
 WeaponAttackType SpellInfo::GetAttackType() const
@@ -2577,8 +2548,8 @@ void SpellInfo::_LoadSpellDiminishInfo()
             }
             case SPELLFAMILY_DRUID:
             {
-                // Pounce
-                if (SpellFamilyFlags[0] & 0x20000)
+                // Pounce - there are two spells which share the same family: the stun effect and the bleed spell. We don't want the bleed to be affected by DR
+                if ((SpellFamilyFlags[0] & 0x20000) && Id != 9007)
                     return DIMINISHING_OPENING_STUN;
                 // Cyclone
                 else if (SpellFamilyFlags[1] & 0x20)

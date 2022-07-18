@@ -55,7 +55,6 @@
 #include "SpellMgr.h"
 #include "SpellScript.h"
 #include "TemporarySummon.h"
-#include "Transport.h"
 #include "UpdateMask.h"
 #include "Util.h"
 #include "Vehicle.h"
@@ -2279,11 +2278,7 @@ ObjectGuid::LowType ObjectMgr::AddGameObjectData(uint32 entry, uint32 mapId, Pos
     // We use spawn coords to spawn
     if (!map->Instanceable() && map->IsGridLoaded(data.spawnPoint))
     {
-        GameObject* go = nullptr;
-        if (goinfo->type == GAMEOBJECT_TYPE_TRANSPORT)
-            go = new Transport();
-        else
-            go = new GameObject();
+        GameObject* go = new GameObject;
 
         if (!go->LoadFromDB(spawnId, map, true))
         {
@@ -2951,16 +2946,16 @@ void ObjectMgr::LoadItemTemplates()
         itemTemplate.FlagsCu = 0;
         itemTemplate.SpellPPMRate = 0.f;
 
-        for (uint32 i = 0; i < MAX_ITEM_PROTO_SPELLS; ++i)
+        itemTemplate.Effects.resize(MAX_ITEM_PROTO_SPELLS);
+        for (uint8 i = 0; i < MAX_ITEM_PROTO_SPELLS; ++i)
         {
-            ItemEffect effect;
+            ItemEffect& effect = itemTemplate.Effects[i];
             effect.SpellID = sparse->SpellID[i];
             effect.Trigger = sparse->SpellTrigger[i];
             effect.Charges = sparse->SpellCharges[i];
             effect.Cooldown = sparse->SpellCooldown[i];
             effect.Category = sparse->SpellCategory[i];
             effect.CategoryCooldown = sparse->SpellCategoryCooldown[i];
-            itemTemplate.Effects.push_back(effect);
         }
 
         ++sparseCount;
@@ -4984,7 +4979,7 @@ void ObjectMgr::LoadScripts(ScriptsType type)
 
     scripts->clear();                                       // need for reload support
 
-    bool isSpellScriptTable = (type == SCRIPTS_SPELL);
+    bool isSpellScriptTable = type == SCRIPTS_SPELL;
     //                                                 0    1       2         3         4          5    6  7  8  9
     QueryResult result = WorldDatabase.PQuery("SELECT id, delay, command, datalong, datalong2, dataint, x, y, z, o%s FROM %s", isSpellScriptTable ? ", effIndex" : "", tableName.c_str());
 
@@ -5306,7 +5301,7 @@ void ObjectMgr::LoadSpellScripts()
 
         uint8 i = (uint8)((uint32(itr->first) >> 24) & 0x000000FF);
         //check for correct spellEffect
-        if (!spellInfo->Effects[i].Effect || (spellInfo->Effects[i].Effect != SPELL_EFFECT_SCRIPT_EFFECT && spellInfo->Effects[i].Effect != SPELL_EFFECT_DUMMY))
+        if (!spellInfo->Effects[i].IsEffect() || (spellInfo->Effects[i].Effect != SPELL_EFFECT_SCRIPT_EFFECT && spellInfo->Effects[i].Effect != SPELL_EFFECT_DUMMY))
             TC_LOG_ERROR("sql.sql", "Table `spell_scripts` - spell %u effect %u is not SPELL_EFFECT_SCRIPT_EFFECT or SPELL_EFFECT_DUMMY", spellId, i);
     }
 }
@@ -5465,7 +5460,7 @@ void ObjectMgr::ValidateSpellScripts()
 
     uint32 count = 0;
 
-    for (auto spell : _spellScriptsStore)
+    for (auto const& spell : _spellScriptsStore)
     {
         SpellInfo const* spellEntry = sSpellMgr->GetSpellInfo(spell.first);
 
@@ -6526,7 +6521,7 @@ WorldSafeLocsEntry const* ObjectMgr::GetClosestGraveyard(WorldLocation const& lo
         }
 
         // find now nearest graveyard at other map
-        if (MapId != entry->Continent && int16(entry->Continent) != mapEntry->ParentMapID)
+        if (MapId != entry->Continent && mapEntry && int16(entry->Continent) != mapEntry->ParentMapID)
         {
             // if find graveyard at different map from where entrance placed (or no entrance data), use any first
             if (!mapEntry
@@ -6909,7 +6904,7 @@ void ObjectMgr::SetHighestGuids()
 
     result = WorldDatabase.Query("SELECT MAX(guid) FROM transports");
     if (result)
-        GetGuidSequenceGenerator<HighGuid::Transport>().Set((*result)[0].GetUInt32() + 1);
+        GetGuidSequenceGenerator<HighGuid::Mo_Transport>().Set((*result)[0].GetUInt32() + 1);
 
     result = CharacterDatabase.Query("SELECT MAX(id) FROM auctionhouse");
     if (result)
@@ -10210,14 +10205,6 @@ void ObjectMgr::LoadTaxiNodeLevelData()
     while (result->NextRow());
 
     TC_LOG_INFO("server.loading", ">> Loaded %u taxi node level definitions in %u ms", count, GetMSTimeDiffToNow(oldMSTime));
-}
-
-uint32 ObjectMgr::GetGameObjectTypeByEntry(uint32 entry) const
-{
-    if (GameObjectTemplate const* goinfo = sObjectMgr->GetGameObjectTemplate(entry))
-        return goinfo->type;
-
-    return MAX_GAMEOBJECT_TYPE;
 }
 
 void ObjectMgr::InitializeQueriesData(QueryDataGroup mask)

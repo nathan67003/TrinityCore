@@ -1365,10 +1365,6 @@ void Spell::SelectImplicitAreaTargets(SpellEffIndex effIndex, SpellImplicitTarge
 
     radius *= m_spellValue->RadiusMod;
 
-    // if this is a proximity based aoe (Frost Nova, Psychic Scream, ...), include the caster's own combat reach
-    if (targetType.IsProximityBasedAoe())
-        radius += GetCaster()->GetCombatReach();
-
     std::list<WorldObject*> targets;
     switch (targetType.GetTarget())
     {
@@ -1808,26 +1804,6 @@ void Spell::SelectImplicitTrajTargets(SpellEffIndex effIndex, SpellImplicitTarge
 
 void Spell::SelectEffectTypeImplicitTargets(uint8 effIndex)
 {
-    // special case for SPELL_EFFECT_SUMMON_RAF_FRIEND and SPELL_EFFECT_SUMMON_PLAYER
-    /// @todo this is a workaround - target shouldn't be stored in target map for those spells
-    switch (m_spellInfo->Effects[effIndex].Effect)
-    {
-        case SPELL_EFFECT_SUMMON_RAF_FRIEND:
-        case SPELL_EFFECT_SUMMON_PLAYER:
-            if (m_caster->GetTypeId() == TYPEID_PLAYER && m_caster->GetTarget())
-            {
-                WorldObject* target = ObjectAccessor::FindPlayer(m_caster->GetTarget());
-
-                CallScriptObjectTargetSelectHandlers(target, SpellEffIndex(effIndex), SpellImplicitTargetInfo());
-
-                if (target && target->ToPlayer())
-                    AddUnitTarget(target->ToUnit(), 1 << effIndex, false);
-            }
-            return;
-        default:
-            break;
-    }
-
     // select spell implicit targets based on effect type
     if (!m_spellInfo->Effects[effIndex].GetImplicitTargetType())
         return;
@@ -2767,7 +2743,8 @@ void Spell::DoAllEffectOnTarget(TargetInfo* target)
     if (missInfo != SPELL_MISS_EVADE && spellHitTarget && !m_caster->IsFriendlyTo(unit) && (!IsPositive() || m_spellInfo->HasEffect(SPELL_EFFECT_DISPEL)))
     {
         if (Unit* unitCaster = m_caster->ToUnit())
-            unitCaster->AtTargetAttacked(unit, m_spellInfo->CausesInitialThreat() && !unitCaster->IsIgnoringCombat());
+            if (!unitCaster->IsCreature() || !unitCaster->ToCreature()->IsTrigger())
+               unitCaster->AtTargetAttacked(unit, m_spellInfo->CausesInitialThreat() && !unitCaster->IsIgnoringCombat());
 
         if (!unit->IsStandState())
             unit->SetStandState(UNIT_STAND_STATE_STAND);
@@ -4889,12 +4866,22 @@ void Spell::SendChannelUpdate(uint32 time)
 
 void Spell::SendChannelStart(uint32 duration)
 {
-    ObjectGuid channelTarget = m_targets.GetObjectTargetGUID();;
+    ObjectGuid channelTarget = m_targets.GetObjectTargetGUID();
     if (!channelTarget && !m_spellInfo->NeedsExplicitUnitTarget())
     {
         // this is for TARGET_SELECT_CATEGORY_NEARBY
         if (m_UniqueTargetInfo.size() + m_UniqueGOTargetInfo.size() == 1)
             channelTarget = !m_UniqueTargetInfo.empty() ? m_UniqueTargetInfo.front().targetGUID : m_UniqueGOTargetInfo.front().targetGUID;
+        else
+        {
+            // We assume that when we have a channel spell with more than one unique unit target that there is a caster and a target.
+            // We don't want the caster but the target so we are looking for a non-caster entry within the target list
+            for (auto& itr : m_UniqueTargetInfo)
+            {
+                if (itr.targetGUID != m_caster->GetGUID())
+                    channelTarget = itr.targetGUID;
+            }
+        }
     }
 
     // There must always be a channel target
@@ -6115,35 +6102,37 @@ SpellCastResult Spell::CheckCast(bool strict, uint32* param1 /*= nullptr*/, uint
             }
             case SPELL_EFFECT_SUMMON_PLAYER:
             {
-                if (m_caster->GetTypeId() != TYPEID_PLAYER)
-                    return SPELL_FAILED_BAD_TARGETS;
-                if (!m_caster->GetTarget())
-                    return SPELL_FAILED_BAD_TARGETS;
-
-                Player* target = ObjectAccessor::FindPlayer(m_caster->ToPlayer()->GetTarget());
-                if (!target || m_caster->ToPlayer() == target || (!target->IsInSameRaidWith(m_caster->ToPlayer()) && m_spellInfo->Id != 48955)) // refer-a-friend spell
-                    return SPELL_FAILED_BAD_TARGETS;
-
-                if (target->HasSummonPending())
-                    return SPELL_FAILED_SUMMON_PENDING;
-
-                // check if our map is dungeon
-                MapEntry const* map = sMapStore.LookupEntry(m_caster->GetMapId());
-                if (map->IsDungeon())
+                // Single target summoning case
+                if (m_targets.GetOrigUnitTargetGUID().IsEmpty())
                 {
-                    uint32 mapId = m_caster->GetMap()->GetId();
-                    Difficulty difficulty = m_caster->GetMap()->GetDifficulty();
-                    if (map->IsRaid())
-                        if (InstancePlayerBind* targetBind = target->GetBoundInstance(mapId, difficulty))
-                            if (InstancePlayerBind* casterBind = m_caster->ToPlayer()->GetBoundInstance(mapId, difficulty))
-                                if (targetBind->perm && targetBind->save != casterBind->save)
-                                    return SPELL_FAILED_TARGET_LOCKED_TO_RAID_INSTANCE;
-
-                    InstanceTemplate const* instance = sObjectMgr->GetInstanceTemplate(mapId);
-                    if (!instance)
-                        return SPELL_FAILED_TARGET_NOT_IN_INSTANCE;
-                    if (!target->Satisfy(sObjectMgr->GetAccessRequirement(mapId, difficulty), mapId))
+                    if (!m_caster->GetTarget())
                         return SPELL_FAILED_BAD_TARGETS;
+
+                    Player* target = ObjectAccessor::FindPlayer(m_caster->ToPlayer()->GetTarget());
+                    if (!target || m_caster->ToPlayer() == target || (!target->IsInSameRaidWith(m_caster->ToPlayer()) && m_spellInfo->Id != 48955)) // refer-a-friend spell
+                        return SPELL_FAILED_BAD_TARGETS;
+
+                    if (target->HasSummonPending())
+                        return SPELL_FAILED_SUMMON_PENDING;
+
+                    // check if our map is dungeon
+                    MapEntry const* map = sMapStore.LookupEntry(m_caster->GetMapId());
+                    if (map->IsDungeon())
+                    {
+                        uint32 mapId = m_caster->GetMap()->GetId();
+                        Difficulty difficulty = m_caster->GetMap()->GetDifficulty();
+                        if (map->IsRaid())
+                            if (InstancePlayerBind* targetBind = target->GetBoundInstance(mapId, difficulty))
+                                if (InstancePlayerBind* casterBind = m_caster->ToPlayer()->GetBoundInstance(mapId, difficulty))
+                                    if (targetBind->perm && targetBind->save != casterBind->save)
+                                        return SPELL_FAILED_TARGET_LOCKED_TO_RAID_INSTANCE;
+
+                        InstanceTemplate const* instance = sObjectMgr->GetInstanceTemplate(mapId);
+                        if (!instance)
+                            return SPELL_FAILED_TARGET_NOT_IN_INSTANCE;
+                        if (!target->Satisfy(sObjectMgr->GetAccessRequirement(mapId, difficulty), mapId))
+                            return SPELL_FAILED_BAD_TARGETS;
+                    }
                 }
                 break;
             }
@@ -7843,11 +7832,23 @@ void Spell::DoAllEffectOnLaunchTarget(TargetInfo& targetInfo, float* multiplier)
         return;
 
     // This will only cause combat - the target will engage once the projectile hits (in DoAllEffectOnTarget)
-    if (m_originalCaster  && targetInfo.missCondition != SPELL_MISS_EVADE
-        && !m_originalCaster->IsFriendlyTo(unit)
-        && (!m_spellInfo->IsPositive() || m_spellInfo->HasEffect(SPELL_EFFECT_DISPEL))
-        && (m_spellInfo->CausesInitialThreat() || m_spellInfo->HasAttribute(SPELL_ATTR2_INITIATE_COMBAT_POST_CAST) || unit->IsEngaged())
-        && !m_originalCaster->IsIgnoringCombat())
+    bool triggerCombat = [&]()
+    {
+        // Basic checks
+        if (!m_originalCaster || targetInfo.missCondition != SPELL_MISS_EVADE
+            || m_originalCaster->IsFriendlyTo(unit) // caster must not be friendly with the target
+            || m_originalCaster->IsIgnoringCombat() // the caster must not be ignoring combat
+            || (m_originalCaster->IsCreature() && m_originalCaster->ToCreature()->IsTrigger())) // the caster must not be a trigger npc. They have aggro spells and AI for that.
+            return false;
+
+        // SpellInfo checks
+        if (m_spellInfo->IsPositive() && !m_spellInfo->HasEffect(SPELL_EFFECT_DISPEL))
+            return false;
+
+        return (m_spellInfo->CausesInitialThreat() || m_spellInfo->HasAttribute(SPELL_ATTR2_INITIATE_COMBAT_POST_CAST) || unit->IsEngaged());
+    }();
+
+    if (triggerCombat)
         m_originalCaster->SetInCombatWith(unit);
 
     for (uint32 i = 0; i < MAX_SPELL_EFFECTS; ++i)

@@ -1279,7 +1279,11 @@ void Creature::SaveToDB()
         return;
     }
 
-    uint32 mapId = GetTransport() ? GetTransport()->GetGOInfo()->moTransport.mapID : GetMapId();
+    uint32 mapId = GetMapId();
+    if (TransportBase* transport = GetTransport())
+        if (transport->GetMapIdForSpawning() >= 0)
+            mapId = transport->GetMapIdForSpawning();
+
     SaveToDB(mapId, data->spawnMask);
 }
 
@@ -3160,7 +3164,6 @@ void Creature::SetSpellFocus(Spell const* focusSpell, WorldObject const* target)
     if (!_spellFocusInfo.ReacquiringTargetDelay)
     { // only overwrite these fields if we aren't transitioning from one spell focus to another
         _spellFocusInfo.OriginalUnitTarget = GetGuidValue(UNIT_FIELD_TARGET);
-        _spellFocusInfo.OriginalOrientation = GetOrientation();
     }
     else // don't automatically reacquire target for the previous spellcast
         _spellFocusInfo.ReacquiringTargetDelay = 0;
@@ -3234,8 +3237,7 @@ void Creature::ReleaseSpellFocus(Spell const* focusSpell, bool withDelay)
     if (focusSpell && focusSpell != _spellFocusInfo.FocusSpell)
         return;
 
-    if (_spellFocusInfo.FocusSpell->GetSpellInfo()->HasAttribute(SPELL_ATTR5_DONT_TURN_DURING_CAST))
-        ClearUnitState(UNIT_STATE_FOCUSING);
+     ClearUnitState(UNIT_STATE_FOCUSING);
 
     if (IsPet()) // player pets do not use delay system
     {
@@ -3265,8 +3267,6 @@ void Creature::ReacquireSpellFocusTarget()
             if (WorldObject const* objTarget = ObjectAccessor::GetWorldObject(*this, _spellFocusInfo.OriginalUnitTarget))
                 SetFacingToObject(objTarget, false);
         }
-        else
-            SetFacingTo(_spellFocusInfo.OriginalOrientation, false);
     }
     _spellFocusInfo.ReacquiringTargetDelay = 0;
 }

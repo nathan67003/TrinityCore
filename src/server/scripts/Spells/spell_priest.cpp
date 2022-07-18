@@ -90,7 +90,6 @@ enum PriestSpells
     SPELL_PRIEST_RENEW                              = 139,
     SPELL_PRIEST_REVELATIONS                        = 88627,
     SPELL_PRIEST_SHADOW_ORB_MARKER                  = 93683,
-    SPELL_PRIEST_SHADOW_ORB_POWER                   = 77486,
     SPELL_PRIEST_SHADOWFORM_VISUAL_WITHOUT_GLYPH    = 107903,
     SPELL_PRIEST_SHADOWFORM_VISUAL_WITH_GLYPH       = 107904,
     SPELL_PRIEST_SHADOW_WORD_DEATH                  = 32409,
@@ -830,41 +829,37 @@ class spell_pri_shadow_word_death : public SpellScript
             });
     }
 
-    void HandleDamageBonus(SpellEffIndex /*effIndex*/)
+    void HandleDamageEffects(SpellEffIndex /*effIndex*/)
     {
         Unit* caster = GetCaster();
         if (!caster)
             return;
 
-        int32 damage = GetEffectValue();
-        if (Unit* target = GetHitUnit())
+        Unit* target = GetHitUnit();
+        int32 damage = GetHitDamage();
+
+        // Shadow Word: Death deals three times the damage when hitting a target below 25% health
+        if (target->GetHealthPct() < 25.f)
         {
-            // Shadow Word: Death deals three times the damage when hitting a target below 25% health
-            if (target->GetHealthPct() < 25.f)
-            {
-                damage *= 3;
+            damage *= 3;
 
-                // Mind Melt talent bonus
-                if (AuraEffect const* effect = target->GetDummyAuraEffect(SPELLFAMILY_PRIEST, PRIEST_ICON_ID_MIND_MELT, EFFECT_0))
-                    AddPct(damage, effect->GetAmount());
-            }
-
-            _launchHealthPct = target->GetHealthPct();
+            // Mind Melt talent bonus
+            if (AuraEffect const* effect = target->GetDummyAuraEffect(SPELLFAMILY_PRIEST, PRIEST_ICON_ID_MIND_MELT, EFFECT_0))
+                AddPct(damage, effect->GetAmount());
         }
 
-        SetEffectValue(damage);
-    }
+        SetHitDamage(damage);
+        _launchHealthPct = target->GetHealthPct();
 
-    void HandleSelfDamagingEffect(SpellEffIndex /*effIndex*/)
-    {
-        int32 damage = GetHitDamage();
-        Unit* caster = GetCaster();
+        // If the target does not die from the damage, the caster suffers the damage dealt to the target.
+        if (target->GetHealth() > uint32(damage))
+        {
+            // Pain and Suffering reduces damage taken of the self-damaging effect
+            if (AuraEffect* aurEff = caster->GetDummyAuraEffect(SPELLFAMILY_PRIEST, PRIEST_ICON_ID_PAIN_AND_SUFFERING, EFFECT_1))
+                AddPct(damage, aurEff->GetAmount());
 
-        // Pain and Suffering reduces damage
-        if (AuraEffect* aurEff = caster->GetDummyAuraEffect(SPELLFAMILY_PRIEST, PRIEST_ICON_ID_PAIN_AND_SUFFERING, EFFECT_1))
-            AddPct(damage, aurEff->GetAmount());
-
-        caster->CastSpell(caster, SPELL_PRIEST_SHADOW_WORD_DEATH, CastSpellExtraArgs(true).AddSpellBP0(damage));
+            caster->CastSpell(caster, SPELL_PRIEST_SHADOW_WORD_DEATH, CastSpellExtraArgs(true).AddSpellBP0(damage));
+        }
     }
 
     void HandleGlyphEffect()
@@ -887,8 +882,7 @@ class spell_pri_shadow_word_death : public SpellScript
 
     void Register() override
     {
-        OnEffectLaunchTarget.Register(&spell_pri_shadow_word_death::HandleDamageBonus, EFFECT_0, SPELL_EFFECT_SCHOOL_DAMAGE);
-        OnEffectHitTarget.Register(&spell_pri_shadow_word_death::HandleSelfDamagingEffect, EFFECT_0, SPELL_EFFECT_SCHOOL_DAMAGE);
+        OnEffectHitTarget.Register(&spell_pri_shadow_word_death::HandleDamageEffects, EFFECT_0, SPELL_EFFECT_SCHOOL_DAMAGE);
         AfterHit.Register(&spell_pri_shadow_word_death::HandleGlyphEffect);
 
     }
@@ -1056,18 +1050,14 @@ class spell_pri_shadow_orbs : public AuraScript
 {
     bool Validate(SpellInfo const* spellInfo) override
     {
-        return ValidateSpellInfo(
-            {
-                SPELL_PRIEST_SHADOW_ORB_POWER,
-                spellInfo->Effects[EFFECT_0].TriggerSpell
-            });
+        return ValidateSpellInfo({ static_cast<uint32>(spellInfo->Effects[EFFECT_0].TriggerSpell) });
     }
 
     bool CheckProc(ProcEventInfo& /*eventInfo*/)
     {
         Unit* target = GetTarget();
         // Do not proc when the target has Shadow Orb Power mastery active
-        if (target->HasAura(SPELL_PRIEST_SHADOW_ORB_POWER, target->GetGUID()))
+        if (target->GetAuraEffect(SPELL_AURA_PROC_TRIGGER_SPELL, SPELLFAMILY_PRIEST, 0, 0, 0x00100000))
             return false;
 
         int32 procChance = 10;
@@ -1096,7 +1086,7 @@ class spell_pri_shadow_orb_power : public AuraScript
 {
     bool Validate(SpellInfo const* spellInfo) override
     {
-        return ValidateSpellInfo({ spellInfo->Effects[EFFECT_0].TriggerSpell });
+        return ValidateSpellInfo({ static_cast<uint32>(spellInfo->Effects[EFFECT_0].TriggerSpell) });
     }
 
     void HandleProc(AuraEffect const* aurEff, ProcEventInfo& /*eventInfo*/)
@@ -1140,9 +1130,11 @@ class spell_pri_shadow_orb : public AuraScript
         PreventDefaultAction();
 
         Unit* target = GetTarget();
-        int32 bp = aurEff->GetAmount();
+        int32 bp = 10;
+        if (AuraEffect const* mastery = target->GetAuraEffect(SPELL_AURA_PROC_TRIGGER_SPELL, SPELLFAMILY_PRIEST, 0, 0, 0x00100000))
+            bp += mastery->GetAmount();
+
         target->CastSpell(target, SPELL_PRIEST_EMPOWERED_SHADOW, CastSpellExtraArgs(aurEff).AddSpellBP0(bp).AddSpellMod(SPELLVALUE_BASE_POINT1, bp));
-        target->RemoveAurasDueToSpell(SPELL_PRIEST_SHADOW_ORB_MARKER);
         Remove();
     }
 
@@ -1595,7 +1587,7 @@ class spell_pri_atonement : public AuraScript
         if (target->GetCombatReach() >= 15.0f)
             caster->CastSpell(target, SPELL_PRIEST_ATONEMENT_TRIGGERED_LARGE, CastSpellExtraArgs(aurEff).AddSpellBP0(bp).AddSpellMod(SPELLVALUE_RADIUS_MOD, int32(target->GetCombatReach() + 15.0f) * 100));
         else
-            caster->CastSpell(target, SPELL_PRIEST_ATONEMENT_TRIGGERED_DEFAULT, CastSpellExtraArgs(aurEff).AddSpellBP0(SPELLVALUE_BASE_POINT0));
+            caster->CastSpell(target, SPELL_PRIEST_ATONEMENT_TRIGGERED_DEFAULT, CastSpellExtraArgs(aurEff).AddSpellBP0(bp));
     }
 
     void Register() override

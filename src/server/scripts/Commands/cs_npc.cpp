@@ -27,6 +27,7 @@ EndScriptData */
 #include "CreatureAI.h"
 #include "CreatureGroups.h"
 #include "DatabaseEnv.h"
+#include "DBCStores.h"
 #include "FollowMovementGenerator.h"
 #include "GameTime.h"
 #include "Language.h"
@@ -349,7 +350,7 @@ public:
         Player* chr = handler->GetSession()->GetPlayer();
         Map* map = chr->GetMap();
 
-        if (MapTransport* trans = chr->GetMapTransport())
+        if (Transport* trans = dynamic_cast<Transport*>(chr->GetTransport()))
         {
             ObjectGuid::LowType guid = sObjectMgr->GenerateCreatureSpawnId();
             CreatureData& data = sObjectMgr->NewOrExistCreatureData(guid);
@@ -1589,7 +1590,7 @@ public:
         if (!name)
             name = "Unknown item";
         handler->PSendSysMessage(alternateString ? LANG_COMMAND_NPC_SHOWLOOT_ENTRY_2 : LANG_COMMAND_NPC_SHOWLOOT_ENTRY,
-            itemCount, ItemQualityColors[itemTemplate ? itemTemplate->GetQuality() : ITEM_QUALITY_POOR], itemId, name, itemId);
+            itemCount, ItemQualityColors[itemTemplate ? itemTemplate->GetQuality() : static_cast<uint8>(ITEM_QUALITY_POOR)], itemId, name, itemId);
     }
     static void _IterateNotNormalLootMap(ChatHandler* handler, NotNormalLootItemMap const& map, std::vector<LootItem> const& items)
     {

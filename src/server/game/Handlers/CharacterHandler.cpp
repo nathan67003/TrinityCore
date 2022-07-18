@@ -54,7 +54,6 @@
 #include "SharedDefines.h"
 #include "SocialMgr.h"
 #include "SystemPackets.h"
-#include "Transport.h"
 #include "World.h"
 #include "WorldPacket.h"
 #include "boost/asio/ip/address.hpp"
@@ -791,14 +790,8 @@ void WorldSession::AbortLogin(WorldPackets::Character::LoginFailureReason reason
     SendPacket(WorldPackets::Character::CharacterLoginFailed(reason).Write());
 }
 
-void WorldSession::HandleLoadScreenOpcode(WorldPacket& recvPacket)
+void WorldSession::HandleLoadScreenOpcode(WorldPackets::Character::LoadingScreenNotify& /*packet*/)
 {
-    TC_LOG_INFO("misc", "WORLD: Recvd CMSG_LOAD_SCREEN");
-    uint32 mapID;
-
-    recvPacket >> mapID;
-    recvPacket.ReadBit();
-
     // TODO: Do something with this packet
 }
 
@@ -936,26 +929,6 @@ void WorldSession::HandlePlayerLogin(LoginQueryHolder const& holder)
     loginVerifyWorld.MapID = pCurrChar->GetMapId();
     loginVerifyWorld.Pos = pCurrChar->GetPosition();
     SendPacket(loginVerifyWorld.Write());
-
-    // check if player is on transport and not added earlier to transport
-    // e.g. in case of loading transport on grid load
-    if (pCurrChar->GetTransportSpawnID() && !pCurrChar->GetTransport())
-    {
-        Transport* transport = nullptr;
-
-        auto bounds = pCurrChar->GetMap()->GetGameObjectBySpawnIdStore().equal_range(pCurrChar->GetTransportSpawnID());
-        if (bounds.first != bounds.second)
-            transport = bounds.first->second->ToTransport();
-
-        if (transport)
-            transport->AddPassenger(pCurrChar);
-        else
-        {
-            pCurrChar->SetTransport(nullptr);
-            pCurrChar->m_movementInfo.transport.Reset();
-            pCurrChar->SetTransportSpawnID(0);
-        }
-    }
 
     pCurrChar->UpdatePositionData();
     pCurrChar->RemoveAurasWithInterruptFlags(SpellAuraInterruptFlags::Login);

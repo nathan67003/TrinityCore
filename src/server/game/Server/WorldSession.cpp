@@ -355,6 +355,8 @@ bool WorldSession::Update(uint32 diff, PacketFilter& updater)
     uint32 processedPackets = 0;
     time_t currentTime = GameTime::GetGameTime();
 
+    constexpr uint32 MAX_PROCESSED_PACKETS_IN_SAME_WORLDSESSION_UPDATE = 100;
+
     while (m_Socket[CONNECTION_TYPE_REALM] && _recvQueue.next(packet, updater))
     {
         ClientOpcodeHandler const* opHandle = opcodeTable[static_cast<OpcodeClient>(packet->GetOpcode())];
@@ -381,6 +383,8 @@ bool WorldSession::Update(uint32 diff, PacketFilter& updater)
                         sScriptMgr->OnPacketReceive(this, *packet);
                         opHandle->Call(this, *packet);
                     }
+                    else
+                        processedPackets = MAX_PROCESSED_PACKETS_IN_SAME_WORLDSESSION_UPDATE;   // break out of packet processing loop
                     // lag can cause STATUS_LOGGEDIN opcodes to arrive after the player started a transfer
                     break;
                 case STATUS_LOGGEDIN_OR_RECENTLY_LOGGOUT:
@@ -393,6 +397,8 @@ bool WorldSession::Update(uint32 diff, PacketFilter& updater)
                         sScriptMgr->OnPacketReceive(this, *packet);
                         opHandle->Call(this, *packet);
                     }
+                    else
+                        processedPackets = MAX_PROCESSED_PACKETS_IN_SAME_WORLDSESSION_UPDATE;   // break out of packet processing loop
                     break;
                 case STATUS_TRANSFER:
                     if (!_player)
@@ -404,6 +410,8 @@ bool WorldSession::Update(uint32 diff, PacketFilter& updater)
                         sScriptMgr->OnPacketReceive(this, *packet);
                         opHandle->Call(this, *packet);
                     }
+                    else
+                        processedPackets = MAX_PROCESSED_PACKETS_IN_SAME_WORLDSESSION_UPDATE;   // break out of packet processing loop
                     break;
                 case STATUS_AUTHED:
                     // prevent cheating with skip queue wait
@@ -423,6 +431,8 @@ bool WorldSession::Update(uint32 diff, PacketFilter& updater)
                         sScriptMgr->OnPacketReceive(this, *packet);
                         opHandle->Call(this, *packet);
                     }
+                    else
+                        processedPackets = MAX_PROCESSED_PACKETS_IN_SAME_WORLDSESSION_UPDATE;   // break out of packet processing loop
                     break;
                 case STATUS_NEVER:
                     TC_LOG_ERROR("network.opcode", "Received not allowed opcode %s from %s", GetOpcodeNameForLogging(static_cast<OpcodeClient>(packet->GetOpcode())).c_str()
@@ -451,7 +461,6 @@ bool WorldSession::Update(uint32 diff, PacketFilter& updater)
 
         deletePacket = true;
 
-#define MAX_PROCESSED_PACKETS_IN_SAME_WORLDSESSION_UPDATE 100
         processedPackets++;
 
         //process only a max amout of packets in 1 Update() call.
@@ -1331,13 +1340,13 @@ uint32 WorldSession::DosProtection::GetMaxPacketCounterAllowed(uint16 opcode) co
         case CMSG_NAME_QUERY:                           //   0               1
         case CMSG_PET_NAME_QUERY:                       //   0               1
         case CMSG_NPC_TEXT_QUERY:                       //   0               1
-        case CMSG_ATTACKSTOP:                           //   0               1
+        case CMSG_ATTACK_STOP:                          //   0               1
         case CMSG_QUERY_QUESTS_COMPLETED:               //   0               1
         case CMSG_QUERY_TIME:                           //   0               1
         case CMSG_CORPSE_MAP_POSITION_QUERY:            //   0               1
         case CMSG_MOVE_TIME_SKIPPED:                    //   0               1
         case MSG_QUERY_NEXT_MAIL_TIME:                  //   0               1
-        case CMSG_SETSHEATHED:                          //   0               1
+        case CMSG_SET_SHEATHED:                         //   0               1
         case MSG_RAID_TARGET_UPDATE:                    //   0               1
         case CMSG_PLAYER_LOGOUT:                        //   0               1
         case CMSG_LOGOUT_REQUEST:                       //   0               1

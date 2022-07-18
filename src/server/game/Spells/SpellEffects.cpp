@@ -26,6 +26,7 @@
 #include "DatabaseEnv.h"
 #include "DynamicObject.h"
 #include "Formulas.h"
+#include "GameEventSender.h"
 #include "GameObject.h"
 #include "GameObjectAI.h"
 #include "GameClient.h"
@@ -39,12 +40,14 @@
 #include "Language.h"
 #include "Log.h"
 #include "LootMgr.h"
+#include "MapManager.h"
 #include "MiscPackets.h"
 #include "MotionMaster.h"
 #include "ObjectAccessor.h"
 #include "ObjectMgr.h"
 #include "Opcodes.h"
 #include "OutdoorPvPMgr.h"
+#include "PartyPackets.h"
 #include "PathGenerator.h"
 #include "Pet.h"
 #include "PhasingHandler.h"
@@ -678,18 +681,63 @@ void Spell::EffectTriggerRitualOfSummoning(SpellEffIndex effIndex)
     if (effectHandleMode != SPELL_EFFECT_HANDLE_HIT)
         return;
 
-    uint32 triggered_spell_id = m_spellInfo->Effects[effIndex].TriggerSpell;
-    SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(triggered_spell_id);
-
+    uint32 summonSpellId = m_spellInfo->Effects[effIndex].TriggerSpell;
+    SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(summonSpellId);
     if (!spellInfo)
     {
-        TC_LOG_ERROR("spells", "EffectTriggerRitualOfSummoning of spell %u: triggering unknown spell id %i.", m_spellInfo->Id, triggered_spell_id);
+        TC_LOG_ERROR("spells", "EffectTriggerRitualOfSummoning of spell %u: triggering unknown spell id %i.", m_spellInfo->Id, summonSpellId);
         return;
     }
 
     finish();
 
-    m_caster->CastSpell(nullptr, spellInfo->Id, false);
+    if (!m_spellInfo->Effects[effIndex].IsTargetingArea())
+        m_caster->CastSpell(nullptr, spellInfo->Id, false);
+    else if (m_caster->IsPlayer())
+    {
+        Player* player = m_caster->ToPlayer();
+        Group* group = player->GetGroup();
+        if (!group)
+            return;
+
+        for (Group::MemberSlot const& memberSlot : group->GetMemberSlots())
+        {
+            if (memberSlot.guid == player->GetGUID())
+                continue;
+
+            Player* member = ObjectAccessor::FindPlayer(memberSlot.guid);
+            if (!member || member->GetSession()->PlayerLogout())
+            {
+                player->SendDirectMessage(WorldPackets::Party::SummonRaidMemberValidateFailed(memberSlot.guid, SummonRaidMemberValidateReasonCode::Offline).Write());
+                continue;
+            }
+
+            if (member->isDead())
+            {
+                player->SendDirectMessage(WorldPackets::Party::SummonRaidMemberValidateFailed(memberSlot.guid, SummonRaidMemberValidateReasonCode::DeadOrGhost).Write());
+                continue;
+            }
+
+            Map::EnterState enterState = sMapMgr->PlayerCannotEnter(player->GetMapId(), member, false);
+            if (enterState != Map::CAN_ENTER)
+            {
+                if (enterState == Map::CANNOT_ENTER_INSTANCE_BIND_MISMATCH)
+                {
+                    // @todo: this will also cause denied summons for dynamic lockouts. Gotta wait for grumpy Shauren to wrap up his lock rework.
+                    player->SendDirectMessage(WorldPackets::Party::SummonRaidMemberValidateFailed(memberSlot.guid, SummonRaidMemberValidateReasonCode::RaidLocked).Write());
+                    continue;
+                }
+                else
+                {
+                    player->SendDirectMessage(WorldPackets::Party::SummonRaidMemberValidateFailed(memberSlot.guid, SummonRaidMemberValidateReasonCode::MapConditionFailed).Write());
+                    continue;
+                }
+            }
+
+            // Member passed all checks. Cast summon spell
+            m_caster->CastSpell(member, spellInfo->Id, false);
+        }
+    }
 }
 
 void Spell::EffectJump(SpellEffIndex effIndex)
@@ -988,12 +1036,7 @@ void Spell::EffectSendEvent(SpellEffIndex effIndex)
 
     TC_LOG_DEBUG("spells", "Spell ScriptStart %u for spellid %u in EffectSendEvent ", m_spellInfo->Effects[effIndex].MiscValue, m_spellInfo->Id);
 
-    if (ZoneScript* zoneScript = m_caster->GetZoneScript())
-        zoneScript->ProcessEvent(target, m_spellInfo->Effects[effIndex].MiscValue);
-    else if (InstanceScript* instanceScript = m_caster->GetInstanceScript())    // needed in case Player is the caster
-        instanceScript->ProcessEvent(target, m_spellInfo->Effects[effIndex].MiscValue);
-
-    m_caster->GetMap()->ScriptsStart(sEventScripts, m_spellInfo->Effects[effIndex].MiscValue, m_caster, target);
+    GameEvents::Trigger(m_spellInfo->Effects[effIndex].MiscValue, m_caster, target);
 }
 
 void Spell::EffectPowerBurn(SpellEffIndex effIndex)
@@ -1544,7 +1587,7 @@ void Spell::SendLoot(ObjectGuid guid, LootType loottype)
                 if (gameObjTarget->GetGOInfo()->chest.eventId)
                 {
                     TC_LOG_DEBUG("spells", "Chest ScriptStart id %u for GO %u", gameObjTarget->GetGOInfo()->chest.eventId, gameObjTarget->GetSpawnId());
-                    player->GetMap()->ScriptsStart(sEventScripts, gameObjTarget->GetGOInfo()->chest.eventId, player, gameObjTarget);
+                    GameEvents::Trigger(gameObjTarget->GetGOInfo()->chest.eventId, player, gameObjTarget);
                 }
 
                 // triggering linked GO
@@ -2922,11 +2965,7 @@ void Spell::EffectSummonObjectWild(SpellEffIndex effIndex)
 
     uint32 gameobject_id = m_spellInfo->Effects[effIndex].MiscValue;
 
-    GameObject* pGameObj = nullptr;
-    if (sObjectMgr->GetGameObjectTypeByEntry(gameobject_id) == GAMEOBJECT_TYPE_TRANSPORT)
-        pGameObj = new Transport();
-    else
-        pGameObj = new GameObject();
+    GameObject* pGameObj = new GameObject;
 
     WorldObject* target = focusObject;
     if (!target)
@@ -3635,14 +3674,16 @@ void Spell::EffectStuck(SpellEffIndex /*effIndex*/)
 
 void Spell::EffectSummonPlayer(SpellEffIndex /*effIndex*/)
 {
-    // workaround - this effect should not use target map
-    if (effectHandleMode != SPELL_EFFECT_HANDLE_HIT_TARGET)
+    if (effectHandleMode != SPELL_EFFECT_HANDLE_LAUNCH)
         return;
 
-    if (!unitTarget || unitTarget->GetTypeId() != TYPEID_PLAYER)
-        return;
-
-    unitTarget->ToPlayer()->SendSummonRequestFrom(m_caster);
+    if (m_targets.GetOrigUnitTargetGUID().IsEmpty())
+    {
+        if (Player* target = ObjectAccessor::FindPlayer(m_caster->GetTarget()))
+            target->SendSummonRequestFrom(m_caster);
+    }
+    else if (Player* target = ObjectAccessor::FindPlayer(m_targets.GetOrigUnitTargetGUID()))
+       target->SendSummonRequestFrom(m_caster);
 }
 
 void Spell::EffectActivateObject(SpellEffIndex effIndex)
@@ -3738,12 +3779,12 @@ void Spell::EffectActivateObject(SpellEffIndex effIndex)
         case GameObjectActions::GoTo8thFloor:
         case GameObjectActions::GoTo9thFloor:
         case GameObjectActions::GoTo10thFloor:
-        {
-            // Cast is kind of loose but it'll do
-            if (Transport* transportTarget = gameObjTarget->ToTransport())
-                transportTarget->SetTransportState(GO_STATE_TRANSPORT_STOPPED, uint32_t(action) - uint32(GameObjectActions::GoTo1stFloor));
+            static_assert(int32(GO_STATE_TRANSPORT_ACTIVE) == int32(GameObjectActions::GoTo1stFloor));
+            if (gameObjTarget->GetGoType() == GAMEOBJECT_TYPE_TRANSPORT)
+                gameObjTarget->SetGoState(GOState(action));
+            else
+                TC_LOG_ERROR("spell", "Spell %d targeted non-transport gameobject for transport only action \"Go to Floor\" %d in effect %d", m_spellInfo->Id, int32(action), int32(effIndex));
             break;
-        }
         case GameObjectActions::None:
             TC_LOG_FATAL("spell", "Spell %d has action type NONE in effect %d", m_spellInfo->Id, int32(effIndex));
             break;
@@ -3983,11 +4024,7 @@ void Spell::EffectSummonObject(SpellEffIndex effIndex)
         m_caster->m_ObjectSlot[slot].Clear();
     }
 
-    GameObject* go = nullptr;
-    if (sObjectMgr->GetGameObjectTypeByEntry(go_id) == GAMEOBJECT_TYPE_TRANSPORT)
-        go = new Transport();
-    else
-        go = new GameObject();
+    GameObject* go = new GameObject();
 
     float x, y, z, o;
     // If dest location if present
@@ -4798,24 +4835,12 @@ void Spell::EffectTransmitted(SpellEffIndex effIndex)
 
     QuaternionData rot = QuaternionData::fromEulerAnglesZYX(fo, 0.f, 0.f);
 
-    GameObject* pGameObj = nullptr;
-    if (goinfo->type == GAMEOBJECT_TYPE_TRANSPORT)
+    GameObject* pGameObj = new GameObject;
+
+    if (!pGameObj->Create(cMap->GenerateLowGuid<HighGuid::GameObject>(), name_id, cMap, Position(fx, fy, fz, m_caster->GetOrientation()), rot, 255, GO_STATE_READY))
     {
-        pGameObj = new Transport();
-        if (!pGameObj->Create(cMap->GenerateLowGuid<HighGuid::Transport>(), name_id, cMap, Position(fx, fy, fz, fo), rot, 255, GO_STATE_READY))
-        {
-            delete pGameObj;
-            return;
-        }
-    }
-    else
-    {
-        pGameObj = new GameObject();
-        if (!pGameObj->Create(cMap->GenerateLowGuid<HighGuid::GameObject>(), name_id, cMap, Position(fx, fy, fz, fo), rot, 255, GO_STATE_READY))
-        {
-            delete pGameObj;
-            return;
-        }
+        delete pGameObj;
+        return;
     }
 
     PhasingHandler::InheritPhaseShift(pGameObj, m_caster);
@@ -5543,13 +5568,11 @@ void Spell::EffectBind(SpellEffIndex effIndex)
 
 void Spell::EffectSummonRaFFriend(SpellEffIndex effIndex)
 {
-    if (effectHandleMode != SPELL_EFFECT_HANDLE_HIT_TARGET)
+    if (effectHandleMode != SPELL_EFFECT_HANDLE_LAUNCH)
         return;
 
-    if (m_caster->GetTypeId() != TYPEID_PLAYER || !unitTarget || unitTarget->GetTypeId() != TYPEID_PLAYER)
-        return;
-
-    m_caster->CastSpell(unitTarget, m_spellInfo->Effects[effIndex].TriggerSpell, true);
+    if (Player* target = ObjectAccessor::FindPlayer(m_caster->GetTarget()))
+        m_caster->CastSpell(nullptr, m_spellInfo->Effects[effIndex].TriggerSpell);
 }
 
 void Spell::EffectUnlockGuildVaultTab(SpellEffIndex effIndex)

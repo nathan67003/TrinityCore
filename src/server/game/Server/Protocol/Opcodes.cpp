@@ -165,8 +165,8 @@ void OpcodeTable::Initialize()
     DEFINE_HANDLER(CMSG_ARENA_TEAM_QUERY,                                 STATUS_LOGGEDIN,  PROCESS_THREADUNSAFE, &WorldSession::HandleArenaTeamQueryOpcode      );
     DEFINE_HANDLER(CMSG_ARENA_TEAM_REMOVE,                                STATUS_LOGGEDIN,  PROCESS_THREADUNSAFE, &WorldSession::HandleArenaTeamRemoveOpcode     );
     DEFINE_HANDLER(CMSG_ARENA_TEAM_ROSTER,                                STATUS_LOGGEDIN,  PROCESS_THREADUNSAFE, &WorldSession::HandleArenaTeamRosterOpcode     );
-    DEFINE_HANDLER(CMSG_ATTACKSTOP,                                       STATUS_LOGGEDIN,  PROCESS_INPLACE,      &WorldSession::HandleAttackStopOpcode          );
-    DEFINE_HANDLER(CMSG_ATTACKSWING,                                      STATUS_LOGGEDIN,  PROCESS_INPLACE,      &WorldSession::HandleAttackSwingOpcode         );
+    DEFINE_HANDLER(CMSG_ATTACK_STOP,                                      STATUS_LOGGEDIN,  PROCESS_INPLACE,      &WorldSession::HandleAttackStopOpcode          );
+    DEFINE_HANDLER(CMSG_ATTACK_SWING,                                     STATUS_LOGGEDIN,  PROCESS_INPLACE,      &WorldSession::HandleAttackSwingOpcode         );
     DEFINE_HANDLER(CMSG_AUCTION_LIST_BIDDER_ITEMS,                        STATUS_LOGGEDIN,  PROCESS_THREADUNSAFE, &WorldSession::HandleAuctionListBidderItems    );
     DEFINE_HANDLER(CMSG_AUCTION_LIST_ITEMS,                               STATUS_LOGGEDIN,  PROCESS_THREADUNSAFE, &WorldSession::HandleAuctionListItems          );
     DEFINE_HANDLER(CMSG_AUCTION_LIST_OWNER_ITEMS,                         STATUS_LOGGEDIN,  PROCESS_THREADUNSAFE, &WorldSession::HandleAuctionListOwnerItems     );
@@ -412,7 +412,7 @@ void OpcodeTable::Initialize()
     DEFINE_HANDLER(CMSG_LF_GUILD_REMOVE_RECRUIT,                          STATUS_LOGGEDIN,  PROCESS_THREADUNSAFE, &WorldSession::HandleGuildFinderRemoveRecruit  );
     DEFINE_HANDLER(CMSG_LF_GUILD_SET_GUILD_POST,                          STATUS_LOGGEDIN,  PROCESS_THREADUNSAFE, &WorldSession::HandleGuildFinderSetGuildPost   );
     DEFINE_HANDLER(CMSG_LIST_INVENTORY,                                   STATUS_LOGGEDIN,  PROCESS_INPLACE,      &WorldSession::HandleListInventoryOpcode       );
-    DEFINE_HANDLER(CMSG_LOAD_SCREEN,                                      STATUS_AUTHED,    PROCESS_THREADUNSAFE, &WorldSession::HandleLoadScreenOpcode          );
+    DEFINE_HANDLER(CMSG_LOADING_SCREEN_NOTIFY,                            STATUS_AUTHED,    PROCESS_THREADUNSAFE, &WorldSession::HandleLoadScreenOpcode          );
     DEFINE_HANDLER(CMSG_LOGOUT_CANCEL,                                    STATUS_LOGGEDIN,  PROCESS_THREADUNSAFE, &WorldSession::HandleLogoutCancelOpcode        );
     DEFINE_HANDLER(CMSG_LOGOUT_REQUEST,                                   STATUS_LOGGEDIN,  PROCESS_THREADUNSAFE, &WorldSession::HandleLogoutRequestOpcode       );
     DEFINE_HANDLER(CMSG_LOG_DISCONNECT,                                   STATUS_NEVER,     PROCESS_INPLACE,      &WorldSession::Handle_EarlyProccess            );
@@ -564,7 +564,7 @@ void OpcodeTable::Initialize()
     DEFINE_HANDLER(CMSG_SEND_MAIL,                                        STATUS_LOGGEDIN,  PROCESS_THREADUNSAFE, &WorldSession::HandleSendMail                  );
     DEFINE_HANDLER(CMSG_SEND_SOR_REQUEST_VIA_ADDRESS,                     STATUS_UNHANDLED, PROCESS_INPLACE,      &WorldSession::Handle_NULL                     );
     DEFINE_HANDLER(CMSG_SEND_SOR_REQUEST_VIA_BNET_ACCOUNT_ID,             STATUS_UNHANDLED, PROCESS_INPLACE,      &WorldSession::Handle_NULL                     );
-    DEFINE_HANDLER(CMSG_SETSHEATHED,                                      STATUS_LOGGEDIN,  PROCESS_INPLACE,      &WorldSession::HandleSetSheathedOpcode         );
+    DEFINE_HANDLER(CMSG_SET_SHEATHED,                                     STATUS_LOGGEDIN,  PROCESS_INPLACE,      &WorldSession::HandleSetSheathedOpcode         );
     DEFINE_HANDLER(CMSG_SET_ACTIONBAR_TOGGLES,                            STATUS_AUTHED,    PROCESS_THREADUNSAFE, &WorldSession::HandleSetActionBarToggles       );
     DEFINE_HANDLER(CMSG_SET_ACTION_BUTTON,                                STATUS_LOGGEDIN,  PROCESS_THREADUNSAFE, &WorldSession::HandleSetActionButtonOpcode     );
     DEFINE_HANDLER(CMSG_SET_ACTIVE_MOVER,                                 STATUS_LOGGEDIN,  PROCESS_THREADUNSAFE, &WorldSession::HandleSetActiveMoverOpcode      );
@@ -1160,7 +1160,7 @@ void OpcodeTable::Initialize()
     DEFINE_SERVER_OPCODE_HANDLER(SMSG_RAID_INSTANCE_MESSAGE,                            STATUS_NEVER,       CONNECTION_TYPE_REALM);
     DEFINE_SERVER_OPCODE_HANDLER(SMSG_RAID_MARKERS_CHANGED,                             STATUS_NEVER,       CONNECTION_TYPE_REALM);
     DEFINE_SERVER_OPCODE_HANDLER(SMSG_RAID_READY_CHECK_THROTTLED_ERROR,                 STATUS_UNHANDLED,   CONNECTION_TYPE_REALM);
-    DEFINE_SERVER_OPCODE_HANDLER(SMSG_RAID_SUMMON_FAILED,                               STATUS_UNHANDLED,   CONNECTION_TYPE_REALM);
+    DEFINE_SERVER_OPCODE_HANDLER(SMSG_SUMMON_RAID_MEMBER_VALIDATE_FAILED,               STATUS_NEVER,       CONNECTION_TYPE_REALM);
     DEFINE_SERVER_OPCODE_HANDLER(SMSG_GENERATE_RANDOM_CHARACTER_NAME_RESULT,            STATUS_NEVER,       CONNECTION_TYPE_REALM);
     DEFINE_SERVER_OPCODE_HANDLER(SMSG_RATED_BG_RATING,                                  STATUS_UNHANDLED,   CONNECTION_TYPE_REALM);
     DEFINE_SERVER_OPCODE_HANDLER(SMSG_RATED_BG_STATS,                                   STATUS_NEVER,       CONNECTION_TYPE_REALM);

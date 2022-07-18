@@ -153,6 +153,8 @@ typedef std::map<uint32, PageText> PageTextContainer;
 
 struct InstanceTemplate
 {
+    InstanceTemplate() : Parent(0), ScriptId(0), AllowMount(false) { }
+
     uint32 Parent;
     uint32 ScriptId;
     bool AllowMount;
@@ -686,6 +688,8 @@ typedef std::vector<PlayerCreateInfoAction> PlayerCreateInfoActions;
 
 struct PlayerCreateInfoSkill
 {
+    PlayerCreateInfoSkill() : SkillId(0), Rank(0) { }
+
     uint16 SkillId;
     uint16 Rank;
 };
@@ -1598,8 +1602,6 @@ class TC_GAME_API ObjectMgr
         void LoadFactionChangeTitles();
 
         bool IsTransportMap(uint32 mapId) const { return _transportMaps.count(mapId) != 0; }
-
-        uint32 GetGameObjectTypeByEntry(uint32 entry) const;
 
         VehicleSeatAddon const* GetVehicleSeatAddon(uint32 seatId) const
         {

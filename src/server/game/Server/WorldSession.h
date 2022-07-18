@@ -91,11 +91,19 @@ namespace WorldPackets
         class CharDelete;
         class EnumCharacters;
         class GenerateRandomCharacterName;
+        class LoadingScreenNotify;
         class PlayerLogin;
         class ShowingCloak;
         class ShowingHelm;
 
         enum class LoginFailureReason : uint8;
+    }
+
+    namespace Combat
+    {
+        class AttackSwing;
+        class CAttackStop;
+        class SetSheathed;
     }
 
     namespace LFG
@@ -641,7 +649,7 @@ class TC_GAME_API WorldSession
         void SendConnectToInstance(WorldPackets::Auth::ConnectToSerial serial);
         void HandleContinuePlayerLogin();
         void AbortLogin(WorldPackets::Character::LoginFailureReason reason);
-        void HandleLoadScreenOpcode(WorldPacket& recvPacket);
+        void HandleLoadScreenOpcode(WorldPackets::Character::LoadingScreenNotify& packet);
         void HandlePlayerLogin(LoginQueryHolder const& holder);
         void HandleCharFactionOrRaceChange(WorldPacket& recvData);
         void HandleCharFactionOrRaceChangeCallback(std::shared_ptr<CharacterFactionChangeInfo> factionChangeInfo, PreparedQueryResult result);
@@ -941,9 +949,9 @@ class TC_GAME_API WorldSession
         void HandleAutoStoreBankItemOpcode(WorldPacket& recvPacket);
         void HandleWrapItemOpcode(WorldPacket& recvPacket);
 
-        void HandleAttackSwingOpcode(WorldPacket& recvPacket);
-        void HandleAttackStopOpcode(WorldPacket& recvPacket);
-        void HandleSetSheathedOpcode(WorldPacket& recvPacket);
+        void HandleAttackSwingOpcode(WorldPackets::Combat::AttackSwing& packet);
+        void HandleAttackStopOpcode(WorldPackets::Combat::CAttackStop& packet);
+        void HandleSetSheathedOpcode(WorldPackets::Combat::SetSheathed& packet);
 
         void HandleUseItemOpcode(WorldPackets::Spells::UseItem& packet);
         void HandleOpenItemOpcode(WorldPacket& recvPacket);
